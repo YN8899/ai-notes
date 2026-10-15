@@ -53,6 +53,8 @@
 
 来源：[Python HTTPStatus 变更说明](https://docs.python.org/zh-cn/3.13/library/http.html)。
 
+第二次 CI（`436886e`，运行 `38694391789`）的后端、前端构建/类型及部署配置检查均通过；完整 OpenAPI 文件 diff 显示显式 description 使 JSON 属性顺序发生变化。此前只比对解析后的 JSON，未覆盖序列化文本顺序。已重新生成 OpenAPI，导出脚本固定 UTF-8/LF，并新增完整文本一致性测试；修复前失败，重新生成后两项接口契约测试在 Python 3.12/3.13 均通过，前端类型保持无差异。
+
 ## 尚未验收
 
 - 真实 GitHub CI 的本次提交运行、ACR 实际 push/pull、服务器应用部署与速度。
