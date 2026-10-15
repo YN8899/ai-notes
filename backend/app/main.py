@@ -86,6 +86,8 @@ def ready(request: Request):
 
 
 errors = {status: {"model": ErrorOut} for status in (400, 401, 403, 404, 409, 422, 429, 500)}
+# Python 3.12/3.13 use different default HTTPStatus phrases for 422.
+errors[422]["description"] = "Unprocessable Content"
 app.include_router(auth_router, prefix="/api/v1", responses=errors)
 app.include_router(jobs_router, prefix="/api/v1", responses=errors)
 app.include_router(files_router, prefix="/api/v1", responses=errors)

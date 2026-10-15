@@ -45,6 +45,14 @@
 
 首次测试驱动用 Windows subprocess text 模式向 Linux CLI 管道输入密码，注入 CRLF，导致测试密码带额外回车并出现登录 401；输出读取另有 GBK 解码错误。最小复现确认 text 模式末尾带 CR、bytes 模式不带 CR。测试驱动改用 UTF-8 字节流后，完整流程通过；未修改应用认证代码。该问题不等同于服务器交互式密码登录失败。
 
+## 云端 CI 首次运行与修复
+
+`35e6600` 已按授权推送 main。首次 Project checks（运行 `38694006513`）的后端迁移和 68 项测试通过，前端接口类型检查因 HTTP 422 的说明文字差异失败：本机 Python 3.13 默认 `Unprocessable Content`，云端 Python 3.12 默认 `Unprocessable Entity`。Python 官方文档记录了 3.13 的 HTTPStatus 命名调整。
+
+已用本地 Python 3.12 Linux 镜像复现相同差异，并新增接口契约回归测试；修复前失败。应用显式固定 422 说明为现有契约中的 `Unprocessable Content`，不改状态码、错误响应内容或 CI 检查强度。修复后回归测试在本机 Python 3.13 venv 与 Linux Python 3.12 均通过，且 Python 3.12 生成的整个 OpenAPI 与已提交文件完全一致。新提交的完整 CI 与镜像发布结果以 GitHub Actions 记录为准。
+
+来源：[Python HTTPStatus 变更说明](https://docs.python.org/zh-cn/3.13/library/http.html)。
+
 ## 尚未验收
 
 - 真实 GitHub CI 的本次提交运行、ACR 实际 push/pull、服务器应用部署与速度。
