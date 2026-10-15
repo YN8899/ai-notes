@@ -106,3 +106,8 @@ class Notification(Entity, Base):
     event_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("outbox_events.id"), unique=True)
     message: Mapped[str] = mapped_column(String(256))
     read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+# Register modular note tables for Alembic and shared metadata discovery.
+from app.modules.notes import models as notes_models  # noqa: E402,F401
+from app.modules.files import models as files_models  # noqa: E402,F401

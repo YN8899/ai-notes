@@ -1,0 +1,75 @@
+# Private development integration on Ubuntu. Run with --env-file .env.server.
+name: ai-notes-server
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+x-backend: &backend
+  image: ${ACR_REGISTRY:?set ACR registry}/${ACR_NAMESPACE:-ai-notes}/backend:${RELEASE_TAG:?set published release tag}
+  env_file: .env.server
+  logging: *logging
+services:
+  db:
+    image: ${ACR_REGISTRY:?set ACR registry}/${ACR_NAMESPACE:-ai-notes}/postgres:${RELEASE_TAG:?set published release tag}
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?set database user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set database password}
+      POSTGRES_DB: ${POSTGRES_DB:?set database name}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    mem_limit: 768m
+    cpus: 0.75
+    logging: *logging
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+  migrate:
+    <<: *backend
+    profiles: [tools]
+    command: ["alembic", "upgrade", "head"]
+    mem_limit: 512m
+    cpus: 1
+    depends_on:
+      db:
+        condition: service_healthy
+  api:
+    <<: *backend
+    mem_limit: 512m
+    cpus: 1
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health/ready', timeout=4)"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+  worker:
+    <<: *backend
+    command: ["python", "-m", "app.worker"]
+    mem_limit: 1024m
+    cpus: 1
+    stop_grace_period: 60s
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+  web:
+    image: ${ACR_REGISTRY:?set ACR registry}/${ACR_NAMESPACE:-ai-notes}/frontend:${RELEASE_TAG:?set published release tag}
+    ports:
+      - "127.0.0.1:8080:80"
+    mem_limit: 128m
+    cpus: 0.5
+    logging: *logging
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+volumes:
+  pgdata:

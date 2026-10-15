@@ -2,6 +2,7 @@ import argparse
 import logging
 import signal
 import time
+import threading
 from app.modules.jobs import service
 from app.shared.config import settings
 
@@ -16,6 +17,25 @@ def stop(*_):
 
 def execute(job):
     log.info("job_started job_id=%s", job["id"])
+    if job["kind"] == "image.process":
+        from app.modules.files.service import process_job
+
+        stop_heartbeat = threading.Event()
+
+        def renew():
+            while not stop_heartbeat.wait(min(5.0, settings().job_lease_seconds / 3)):
+                if stopping or not service.heartbeat(job["id"], job["token"]):
+                    return
+
+        heartbeat = threading.Thread(target=renew, daemon=True)
+        heartbeat.start()
+        try:
+            if not stopping:
+                process_job(job)
+        finally:
+            stop_heartbeat.set()
+            heartbeat.join(timeout=2)
+        return
     if job["kind"] != "diagnostic":
         raise ValueError("unsupported_handler")
     deadline = time.monotonic() + job["payload"]["duration_seconds"]
@@ -53,8 +73,10 @@ def main():
     while not stopping:
         try:
             found = tick()
-            if time.monotonic() - last_maintenance > 3600:
+            if time.monotonic() - last_maintenance > 60:
+                from app.modules.files.service import maintenance as file_maintenance
                 service.maintenance()
+                file_maintenance()
                 last_maintenance = time.monotonic()
         except Exception:
             log.warning("worker_tick_failed")

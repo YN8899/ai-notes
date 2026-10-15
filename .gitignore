@@ -1,4 +1,8 @@
 .env
+.env.*
+!.env.example
+.local/
+.backups/
 .venv/
 node_modules/
 dist/
@@ -9,3 +13,8 @@ __pycache__/
 *.egg-info/
 test-results/
 .DS_Store
+/AGENTS.md
+*.pem
+*.key
+*.p12
+*.pfx

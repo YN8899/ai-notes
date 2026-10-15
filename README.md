@@ -1,6 +1,6 @@
 # 知页 AI 笔记 Web
 
-M0 基础工程，版本 0.1.0。手机和电脑共用 React 前端，后端为 FastAPI，数据保存至 PostgreSQL，后台任务由独立 Worker 执行。
+M1 开发中，版本 0.1.0。手机和电脑共用 React 前端，后端为 FastAPI，数据保存至 PostgreSQL，后台任务由独立 Worker 执行。
 
 ## 当前可用功能
 
@@ -8,11 +8,15 @@ M0 基础工程，版本 0.1.0。手机和电脑共用 React 前端，后端为 
 - 管理员创建和停用邀请码，管理成员状态，查看操作审计。
 - 数据库会话、Argon2id 密码哈希、CSRF 和 Origin 校验、持久化登录限流。
 - 私人资源权限检查；管理员不绕过所有者权限。
+- 文件夹、笔记本、标签与私人笔记，自动保存、版本冲突提示、历史版本和回收站。
+- Tiptap 富文本、公式、代码块、Markdown 导入与本机草稿恢复。
+- 图片笔记批量预览、排序、上传、后台生成阅读图和缩略图、失败重试与缩放阅读器。
+- 私有 OSS 官方 SDK 适配器与权限校验后的图片代理；开发环境可使用本地私有存储。
 - 持久任务队列、去重、租约续期、过期回收、退避重试和失败任务人工重试。
 - 事务 Outbox 和幂等站内通知投递；可在网页发起后台自检并查看真实结果。
 - Alembic 初始迁移、OpenAPI 与生成的 TypeScript 类型、依赖锁文件、Docker Compose 和 GitHub Actions CI。
 
-笔记上传、富文本编辑、AI API 调用、OCR、复习、聊天与社区属于后续阶段。M0 不需要任何模型 Key，不会产生模型调用费用；首页明确标注各阶段开放状态。
+当前暂用“私有 OSS + 后端图片代理”，无需 OSS 图片自定义域名。配置见 [OSS私有存储与图片代理配置](docs/OSS私有存储与图片代理配置.md)。ECS 已更换为 Ubuntu 24.04，采用 GitHub 获取代码、GitHub Actions 构建、杭州 ACR 个人版分发镜像和 Compose 私有开发联调，步骤见 [Ubuntu服务器部署与运维](docs/Ubuntu服务器部署与运维.md)；进度见 [M1开发与云端验收计划](docs/M1开发与云端验收计划.md)。真实 OSS SDK 联调与本机网页上传 → Worker 生成阅读图/缩略图 → 后端代理阅读已通过。ECS 应用部署和完整 M1 尚未验收。AI API 调用、OCR、复习、聊天与社区仍未开放，当前不需要模型 Key。
 
 ## 本地启动
 
@@ -39,11 +43,13 @@ docker compose start worker
 docker compose down
 ```
 
-正常 down 保留命名数据库卷；`docker compose down -v` 会删除数据。不要对有重要内容的环境使用该命令。
+正常 down 保留命名数据库卷与本地图片卷；`docker compose down -v` 会删除这些数据。不要对有重要内容的环境使用该命令。
 
 ## 开发启动
 
 后端使用 Python 3.12 或以上，前端使用 Node.js 22。先启动 PostgreSQL，创建专用开发数据库，配置 DATABASE_URL。
+
+当前本机已准备 `compose.dev.yaml` 持久化开发库，端口 55433、数据库 `notes_dev`，API/Worker 沿用项目虚拟环境。私密配置已在 Git 忽略路径中生成；管理员创建、三个进程启动、停止与恢复见 [本地开发启动与停止](docs/本地开发启动与停止.md)。它与临时回归测试库分开保存数据。
 
 ```bash
 cd backend
@@ -68,7 +74,7 @@ npm run dev
 
 ## 原生 PostgreSQL 测试
 
-测试会清空 M0 的业务表，只能使用隔离测试库。以下 Compose 测试库使用临时内存卷，不与应用数据卷共享。
+测试会清空业务表，只能使用隔离测试库。以下 Compose 测试库使用临时内存卷，不与应用数据卷共享。
 
 ```bash
 docker compose -f compose.test.yaml up -d --wait
@@ -101,6 +107,8 @@ npm run build
 |---|---|
 | backend/app/modules/auth | 账户、会话、邀请码、恢复与管理员接口 |
 | backend/app/modules/jobs | 后台任务、通知与队列服务 |
+| backend/app/modules/notes | 笔记组织、正文、版本、回收站 |
+| backend/app/modules/files | 私有存储、上传会话、图片处理与代理 |
 | backend/app/shared | 配置、事务、模型、错误、安全与权限 |
 | backend/app/worker.py | 独立后台任务入口 |
 | backend/alembic | 可审查、可执行的数据库迁移 |
@@ -109,7 +117,7 @@ npm run build
 | .github/workflows | 原生 PostgreSQL、构建与契约检查 |
 | scripts | 本地配置初始化 |
 
-M1 从新增 notes 与 files 模块开始。使用 require_owner 检查私人资源，不把 admin 作为读取私人内容的通行证。后台新处理器必须以 lease 验证的事务写入业务副作用；对非幂等外部 API 的未知结果，另行设计 unknown 状态，不能套用当前自检任务的自动重试策略。
+notes 与 files 模块均检查私人所有者，不把 admin 作为读取私人内容的通行证。后台新处理器必须以 lease 验证的事务写入业务副作用；对非幂等外部 API 的未知结果，另行设计 unknown 状态，不能套用当前自检任务的自动重试策略。
 
 Outbox 将业务变更和事件保存在同一个数据库事务，通知投递与 delivered_at 也在同一事务中完成。本期仅使用站内通知列表轮询，实时 WebSocket 在后续阶段加入。
 
@@ -124,8 +132,11 @@ Outbox 将业务变更和事件保存在同一个数据库事务，通知投递�
 | RATE_LIMIT_REQUESTS / RATE_LIMIT_SECONDS | 每个来源 IP 的认证接口限额，默认每 300 秒 10 次 |
 | JOB_LEASE_SECONDS | 默认 30 秒；Worker 按租约续期，旧执行者不能完成新租约任务 |
 | DB_POOL_SIZE / DB_MAX_OVERFLOW | 每个进程默认 5 / 5，按总数据库连接预算调整 |
+| STORAGE_BACKEND / STORAGE_ROOT | 开发默认 local；API 与 Worker 使用同一目录，Compose 配置共享 filesdata 卷 |
+| OSS_REGION / OSS_BUCKET / OSS_ENDPOINT / OSS_PREFIX | 当前杭州私有 Bucket；默认区域 HTTPS Endpoint，专用 ai-notes/ 前缀 |
+| OSS_ACCESS_KEY_ID / OSS_ACCESS_KEY_SECRET / OSS_SECURITY_TOKEN | 仅注入服务端；长期 AccessKey 不填 security token；真实值禁止提交 |
 
-Docker 配置仅绑定本机 8080，数据库和 API 无公网映射。它是开发环境配置，ECS 正式域名、HTTPS、备份与监测部署将在 M1 配置。生产时不使用开发服务器或测试凭证。
+`compose.yaml` 是本地构建开发配置；`compose.server.yaml` 是从 ACR 拉取镜像的 Ubuntu 私有开发联调配置，使用独立 `.env.server`。两者均只绑定本机 8080，数据库和 API 无公网映射。服务器联调通过 SSH 隧道访问；正式域名、HTTPS、备份恢复及生产配置另行验收，ACR 个人版不用于正式生产业务。
 
 账户恢复由管理员核实身份后生成 30 分钟一次性凭证；新凭证替代旧凭证，成功重置后撤销全部旧会话。管理员自身只能在服务器执行 `python -m app.cli reset-admin --username admin` 恢复。
 
@@ -133,6 +144,6 @@ Docker 配置仅绑定本机 8080，数据库和 API 无公网映射。它是开
 
 ## 当前验证范围
 
-前端生产构建、TypeScript 编译、OpenAPI 类型一致性检查和依赖漏洞检查已通过。数据库迁移与 16 项功能测试在嵌入式 PostgreSQL PGlite 环境通过，包括真正终止 Worker 进程后由新进程接管任务且不重复通知；该环境使用临时测试驱动，未替换交付工程的 PostgreSQL 与 psycopg 配置。
+2026-10-14：隔离原生 PostgreSQL 后端 68 项测试通过，Alembic 升级与 check 通过；自动保存延迟请求回归 1 项通过；前端 TypeScript 与生产构建通过。OSS 测试使用替身客户端，不能作为真实 Bucket 验收。富文本编辑器的独立构建块仍有体积提示。
 
-2 项原生多连接并发测试在此环境跳过，已配置到真实 PostgreSQL 的 CI。Docker 构建运行和手机电脑浏览器操作仍需在目标环境验收，不能将 CI 配置本身视为 CI 已通过。
+首次真实 OSS 联调因 RAM 用户与 Bucket 分属不同账号收到 `403 AccessDenied`；在 Bucket 所属账号重建受限用户、授权并替换私密配置后，77 字节测试图的上传、大小检查、读取比对、删除与删除后不存在检查全部通过。随后两张生成图片的真实网页上传、Worker 派生图、代理阅读、缩放、页序调整与刷新保留通过；测试笔记保留，6 个对象数据库记录合计 55021 字节。Ubuntu ECS 应用部署、手机真实触控、模型调用、备份恢复均未验收；这些事项按 M1 计划继续。Docker 图片共享卷配置已补齐，但这轮尚未完成整套应用容器构建运行验证。

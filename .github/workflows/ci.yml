@@ -1,5 +1,10 @@
-name: M0 checks
-on: [push, pull_request]
+name: Project checks
+on:
+  push:
+  pull_request:
+  workflow_call:
+permissions:
+  contents: read
 jobs:
   verify:
     runs-on: ubuntu-latest
@@ -21,6 +26,8 @@ jobs:
       RATE_LIMIT_REQUESTS: 1000
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -37,6 +44,8 @@ jobs:
         working-directory: backend
       - run: npm ci && npm run check:types && npm run build
         working-directory: frontend
+      - run: node --experimental-strip-types --test frontend/tests/autosave.test.mjs
+      - run: python -m unittest discover -s tests -p "test_*.py"
       - run: git diff --exit-code -- backend/openapi.json
       - run: cp .env.example .env && docker compose config --quiet
       - run: docker compose build

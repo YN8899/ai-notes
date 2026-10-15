@@ -2,4 +2,13 @@
 __pycache__
 .pytest_cache
 .env
+.env.*
+.local
+.backups
 tests
+.git
+AGENTS.md
+*.pem
+*.key
+*.p12
+*.pfx

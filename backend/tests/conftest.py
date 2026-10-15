@@ -8,6 +8,8 @@ if not test_url:
 os.environ["DATABASE_URL"] = test_url
 os.environ["APP_ORIGIN"] = "http://testserver"
 os.environ["RATE_LIMIT_REQUESTS"] = "1000"
+# A developer's private .env must never make the regression suite use real OSS.
+os.environ["STORAGE_BACKEND"] = "local"
 from app.shared.db import engine, SessionLocal, Base
 from app.shared.models import User
 from app.shared.security import hasher

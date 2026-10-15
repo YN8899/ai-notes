@@ -21,6 +21,7 @@ export async function api<T>(path:string, method='GET', body?:unknown):Promise<T
     headers['X-CSRF-Token']=data.csrf_token
   }
   const response = await fetch('/api/v1'+path,{method,headers,credentials:'same-origin',body:body === undefined ? undefined : JSON.stringify(body)})
+  if (response.status===204) return undefined as T
   const data=await response.json()
   if (!response.ok) throw new ApiError(response.status,data.code,data.message,data.request_id)
   return data as T

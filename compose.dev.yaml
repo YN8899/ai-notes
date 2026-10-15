@@ -1,0 +1,22 @@
+# Local development database for the native backend and Vite frontend.
+# Credentials are generated in the ignored .local/postgres.env file.
+name: ai-notes-dev
+services:
+  db:
+    image: postgres:16.8-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?configure .local/postgres.env first}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?configure database password}
+      POSTGRES_DB: ${POSTGRES_DB:?configure database name}
+    ports:
+      - "127.0.0.1:55433:5432"
+    volumes:
+      - dev_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+volumes:
+  dev_pgdata:

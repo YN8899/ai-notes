@@ -24,6 +24,10 @@ services:
   api:
     build: ./backend
     env_file: .env
+    environment:
+      STORAGE_ROOT: /var/lib/ai-notes/files
+    volumes:
+      - filesdata:/var/lib/ai-notes/files
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -36,6 +40,10 @@ services:
   worker:
     build: ./backend
     env_file: .env
+    environment:
+      STORAGE_ROOT: /var/lib/ai-notes/files
+    volumes:
+      - filesdata:/var/lib/ai-notes/files
     command: ["python", "-m", "app.worker"]
     depends_on:
       migrate:
@@ -51,3 +59,4 @@ services:
     restart: unless-stopped
 volumes:
   pgdata:
+  filesdata:

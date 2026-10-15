@@ -1,0 +1,74 @@
+name: Publish development images to ACR
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: publish-acr-development
+  cancel-in-progress: false
+jobs:
+  verify:
+    if: github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/ci.yml
+  publish:
+    needs: verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      ACR_REGISTRY: ${{ vars.ACR_REGISTRY }}
+      ACR_NAMESPACE: ai-notes
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Validate destination and choose a release tag
+        run: |
+          python3 - <<'PY'
+          import os, re
+          registry = os.environ.get("ACR_REGISTRY", "")
+          if not re.fullmatch(r"crpi-[a-z0-9]+\.cn-hangzhou\.personal\.cr\.aliyuncs\.com", registry):
+              raise SystemExit("Set the ACR_REGISTRY repository variable to the public Hangzhou personal instance hostname")
+          PY
+          printf 'RELEASE_TAG=sha-%s-%s-%s\n' "$GITHUB_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" >> "$GITHUB_ENV"
+      - name: Build the application images
+        run: |
+          docker build --platform linux/amd64 \
+            --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" \
+            --label "org.opencontainers.image.revision=$GITHUB_SHA" \
+            --tag "$ACR_REGISTRY/$ACR_NAMESPACE/backend:$RELEASE_TAG" ./backend
+          docker build --platform linux/amd64 \
+            --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" \
+            --label "org.opencontainers.image.revision=$GITHUB_SHA" \
+            --tag "$ACR_REGISTRY/$ACR_NAMESPACE/frontend:$RELEASE_TAG" ./frontend
+      - name: Prepare the official PostgreSQL image
+        run: |
+          docker pull --platform linux/amd64 postgres:16.8-alpine
+          docker tag postgres:16.8-alpine "$ACR_REGISTRY/$ACR_NAMESPACE/postgres:$RELEASE_TAG"
+          printf 'PostgreSQL upstream: ' >> "$GITHUB_STEP_SUMMARY"
+          docker image inspect postgres:16.8-alpine --format '{{index .RepoDigests 0}}' >> "$GITHUB_STEP_SUMMARY"
+      - name: Authenticate to ACR
+        env:
+          ACR_USERNAME: ${{ secrets.ACR_USERNAME }}
+          ACR_PASSWORD: ${{ secrets.ACR_PASSWORD }}
+        run: |
+          test -n "$ACR_USERNAME" || { printf '%s\n' 'Missing ACR_USERNAME secret'; exit 1; }
+          test -n "$ACR_PASSWORD" || { printf '%s\n' 'Missing ACR_PASSWORD secret'; exit 1; }
+          printf '%s' "$ACR_PASSWORD" | docker login "$ACR_REGISTRY" --username "$ACR_USERNAME" --password-stdin
+      - name: Publish all images and record the release
+        run: |
+          for image in backend frontend postgres; do
+            docker push "$ACR_REGISTRY/$ACR_NAMESPACE/$image:$RELEASE_TAG"
+          done
+          {
+            printf '\n## Development release\n\n'
+            printf 'Commit: `%s`\n\n' "$GITHUB_SHA"
+            printf 'RELEASE_TAG=%s\n\n' "$RELEASE_TAG"
+            for image in backend frontend postgres; do
+              docker image inspect "$ACR_REGISTRY/$ACR_NAMESPACE/$image:$RELEASE_TAG" --format '{{range .RepoDigests}}{{println .}}{{end}}' | grep -F "$ACR_REGISTRY/$ACR_NAMESPACE/$image@"
+            done
+            printf '\nOnly deploy after this job has completed successfully.\n'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Remove the registry login from this runner
+        if: always()
+        run: |
+          if [ -n "$ACR_REGISTRY" ]; then docker logout "$ACR_REGISTRY"; fi
