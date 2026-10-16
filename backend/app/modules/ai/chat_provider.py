@@ -16,7 +16,7 @@ def create_client():
     return httpx.Client(timeout=httpx.Timeout(20, connect=5), follow_redirects=False, trust_env=False)
 
 
-def stream_chat(secret, model, messages):
+def stream_chat(secret, model, messages, *, max_tokens=4096):
     deadline = time.monotonic() + 180
     finished = False
     total_bytes = 0
@@ -24,7 +24,7 @@ def stream_chat(secret, model, messages):
         with create_client() as client:
             with client.stream("POST", URL, headers={"Authorization": "Bearer " + secret}, json={
                 "model": model, "messages": messages, "stream": True,
-                "stream_options": {"include_usage": True}, "max_tokens": 4096,
+                "stream_options": {"include_usage": True}, "max_tokens": max_tokens,
                 "thinking": {"type": "disabled"},
             }) as response:
                 if response.status_code != 200:

@@ -7,7 +7,7 @@ import time
 from sqlalchemy import func, select, update
 
 from app.modules.ai import chat_provider
-from app.modules.ai.models import AiConversation, AiRun
+from app.modules.ai.models import AiConversation, AiRun, AiStep
 from app.modules.ai.schemas import RunOut
 from app.shared.config import settings
 from app.shared.db import SessionLocal, utcnow
@@ -59,18 +59,35 @@ def create_run(db, owner, conversation_id, data):
     recent = db.scalar(select(func.count()).select_from(AiRun).where(AiRun.owner_id == owner, AiRun.created_at > utcnow() - timedelta(hours=1)))
     if recent >= 30:
         raise AppError(429, "ai_rate_limited", "每小时最多发送 30 次，请稍后再试")
+    from app.modules.ai import pdf_context
+    source = pdf_context.freeze(db, owner, data.pdf) if data.pdf else None
+    if source and data.model != "deepseek-flash":
+        raise AppError(422, "vision_model_required", "PDF 页图提问需要支持图片的 DeepSeek Flash")
+    for item in history:
+        if item.status == "succeeded" and item.source:
+            pdf_context.validate(db, owner, item.source)
+            if source and source["note_id"] != item.source["note_id"]:
+                raise AppError(422, "pdf_conversation_scope", "一段对话仅引用同一本 PDF，更换 PDF 请新建对话")
     messages = [{"role": "system", "content": SYSTEM}]
     for item in history:
         # Failed/cancelled turns are visible in history but excluded from future model context.
         if item.status == "succeeded":
-            messages.extend([{"role": "user", "content": item.prompt}, {"role": "assistant", "content": item.answer}])
+            scope = ""
+            if item.source:
+                scope = "\n[当时附加原 PDF 页码：" + ",".join(str(p["number"]) for p in item.source["pages"]) + "]"
+            messages.extend([{"role": "user", "content": item.prompt + scope}, {"role": "assistant", "content": item.answer}])
     messages.append({"role": "user", "content": data.prompt})
     if sum(len(m["content"].encode("utf-8")) for m in messages) > 32000:
         raise AppError(422, "context_too_large", "这段对话的上下文已满，请新建对话；不会自动截掉前文")
     if not history:
         parent.title = data.prompt.strip()[:64]
     row = AiRun(owner_id=owner, conversation_id=conversation_id, request_key=data.request_key,
-                request_hash=request_hash, prompt=data.prompt, model=data.model, input_messages=messages)
+                request_hash=request_hash, prompt=data.prompt, model=data.model, input_messages=messages, source=source)
+    if source:
+        groups = pdf_context.batches(source)
+        row.progress = {"stage": "queued", "completed_pages": 0, "total_pages": len(source["pages"]),
+                        "completed_batches": 0, "total_batches": len(groups), "call_count": 0,
+                        "planned_calls": pdf_context.planned_calls(len(groups)), "current_pages": [], "usage_complete": False}
     db.add(row)
     db.commit()
     return row
@@ -80,6 +97,8 @@ def recover(db):
     # A lost lease may have already incurred a charge. Never put it back in the queue.
     db.execute(update(AiRun).where(AiRun.status == "running", AiRun.lease_until < utcnow()).values(
         status="interrupted", error_code="worker_interrupted", finished_at=utcnow(), lease_until=None))
+    db.execute(update(AiStep).where(AiStep.status == "running", AiStep.run_id.in_(
+        select(AiRun.id).where(AiRun.status.not_in(ACTIVE)))).values(status="failed", error_code="run_interrupted"))
 
 
 def claim():
@@ -120,7 +139,11 @@ def execute(run_id):
     try:
         with SessionLocal() as db:
             row = db.get(AiRun, run_id)
-            model, messages = row.model, row.input_messages
+            model, messages, source = row.model, row.input_messages, row.source
+        if source:
+            from app.modules.ai.pdf_chat import execute_pdf
+            execute_pdf(run_id)
+            return
         if not save_progress(run_id, answer, usage):
             return
         secret = settings().deepseek_api_key.get_secret_value()
