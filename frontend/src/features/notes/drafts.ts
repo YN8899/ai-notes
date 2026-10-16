@@ -13,8 +13,11 @@ export function clearUserDrafts(owner:string) {
   keys.forEach(k=>localStorage.removeItem(k))
   sessionStorage.removeItem(prefix+owner+':selected-note')
   sessionStorage.removeItem(prefix+owner+':section')
+  sessionStorage.removeItem('ai-notes:chat:'+owner)
 }
 export function selectedNote(owner:string):string {try{return sessionStorage.getItem(prefix+owner+':selected-note')||''}catch{return ''}}
 export function rememberNote(owner:string,id:string){try{if(id)sessionStorage.setItem(prefix+owner+':selected-note',id);else sessionStorage.removeItem(prefix+owner+':selected-note')}catch{/* Navigation still works when browser storage is unavailable. */}}
 export function wasNotesOpen(owner:string):boolean{try{return sessionStorage.getItem(prefix+owner+':section')==='notes'}catch{return false}}
 export function rememberSection(owner:string,section:string){try{sessionStorage.setItem(prefix+owner+':section',section)}catch{/* Navigation still works when browser storage is unavailable. */}}
+
+export function wasChatOpen(owner:string):boolean{try{return sessionStorage.getItem(prefix+owner+':section')==='chat'}catch{return false}}

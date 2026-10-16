@@ -18,7 +18,7 @@ M1 开发中，版本 0.1.0。手机和电脑共用 React 前端，后端为 Fas
 - 事务 Outbox 和幂等站内通知投递；可在网页发起后台自检并查看真实结果。
 - Alembic 初始迁移、OpenAPI 与生成的 TypeScript 类型、依赖锁文件、Docker Compose 和 GitHub Actions CI。
 
-当前暂用“私有 OSS + 后端图片代理”，无需 OSS 图片自定义域名。配置见 [OSS私有存储与图片代理配置](docs/OSS私有存储与图片代理配置.md)。ECS 已更换为 Ubuntu 24.04，采用 GitHub 获取代码、GitHub Actions 构建、杭州 ACR 个人版分发镜像和 Compose 私有开发联调，步骤见 [Ubuntu服务器部署与运维](docs/Ubuntu服务器部署与运维.md)；进度见 [M1开发与云端验收计划](docs/M1开发与云端验收计划.md)。真实 OSS SDK 联调与本机网页上传 → Worker 生成阅读图/缩略图 → 后端代理阅读已通过。ECS 应用部署和完整 M1 尚未验收。共享模型配置已开放，启用方式见 [共享模型与DeepSeek配置](docs/共享模型与DeepSeek配置.md)；聊天生成、OCR、复习与社区仍未开放，笔记功能不依赖模型 Key。
+当前暂用“私有 OSS + 后端图片代理”，无需 OSS 图片自定义域名。配置见 [OSS私有存储与图片代理配置](docs/OSS私有存储与图片代理配置.md)。ECS 已更换为 Ubuntu 24.04，采用 GitHub 获取代码、GitHub Actions 构建、杭州 ACR 个人版分发镜像和 Compose 私有开发联调，步骤见 [Ubuntu服务器部署与运维](docs/Ubuntu服务器部署与运维.md)；进度见 [M1开发与云端验收计划](docs/M1开发与云端验收计划.md)。真实 OSS SDK 联调与本机网页上传 → Worker 生成阅读图/缩略图 → 后端代理阅读已通过。ECS 应用部署和完整 M1 尚未验收。共享模型配置已开放，启用方式见 [共享模型与DeepSeek配置](docs/共享模型与DeepSeek配置.md)；AI 文字对话已开放，使用方式见 [AI文字对话与运行恢复](docs/AI文字对话与运行恢复.md)；PDF 选页提问、OCR、复习与社区仍未开放，笔记功能不依赖模型 Key。
 
 ## 本地启动
 
