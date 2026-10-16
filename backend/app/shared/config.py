@@ -2,7 +2,7 @@ from functools import lru_cache
 from typing import Literal
 import re
 from urllib.parse import urlsplit
-from pydantic import SecretStr, model_validator
+from pydantic import SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -27,6 +27,9 @@ class Settings(BaseSettings):
     upload_expiry_seconds: int = 600
     file_ticket_seconds: int = 300
     upload_read_timeout_seconds: int = 60
+    pdf_max_bytes: int = 50 * 1024 * 1024
+    pdf_max_pages: int = 200
+    pdf_page_timeout_seconds: int = 60
     oss_region: str = "cn-hangzhou"
     oss_bucket: str = ""
     oss_endpoint: str = ""
@@ -34,6 +37,15 @@ class Settings(BaseSettings):
     oss_access_key_id: SecretStr = SecretStr("")
     oss_access_key_secret: SecretStr = SecretStr("")
     oss_security_token: SecretStr = SecretStr("")
+    deepseek_api_key: SecretStr = SecretStr("")
+
+    @field_validator("deepseek_api_key")
+    @classmethod
+    def validate_deepseek_api_key(cls, value):
+        raw = value.get_secret_value()
+        if raw and (not 16 <= len(raw) <= 512 or any(ord(character) < 33 or ord(character) > 126 for character in raw)):
+            raise ValueError("DeepSeek API Key must contain 16 to 512 visible ASCII characters")
+        return value
 
     @model_validator(mode="after")
     def validate_production(self):
@@ -45,9 +57,12 @@ class Settings(BaseSettings):
             raise ValueError("Limits must be positive")
         if self.db_pool_size < 1 or self.db_max_overflow < 0:
             raise ValueError("Invalid database pool limits")
+        if self.pdf_max_pages > 500:
+            raise ValueError("PDF page limit must not exceed the reader's 500-page ordering limit")
         if min(self.upload_max_bytes, self.upload_max_pixels, self.upload_batch_limit,
                self.storage_quota_bytes, self.upload_expiry_seconds, self.file_ticket_seconds,
-               self.upload_read_timeout_seconds) < 1:
+               self.upload_read_timeout_seconds, self.pdf_max_bytes, self.pdf_max_pages,
+               self.pdf_page_timeout_seconds) < 1:
             raise ValueError("File limits must be positive")
         if self.app_env == "production" and self.storage_backend == "local":
             raise ValueError("Production requires configured OSS storage")

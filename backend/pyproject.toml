@@ -12,9 +12,11 @@ dependencies = [
  "argon2-cffi==25.1.0",
  "pillow==12.3.0",
  "alibabacloud-oss-v2==1.4.0",
+ "httpx==0.28.1",
+ "pypdfium2==5.14.0",
 ]
 [dependency-groups]
-dev = ["pytest==8.3.5", "httpx==0.28.1"]
+dev = ["pytest==8.3.5"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]

@@ -83,3 +83,23 @@ class FileTicket(Entity, Base):
     __table_args__ = (
         ForeignKeyConstraint(["owner_id", "file_id"], ["files.owner_id", "files.id"], name="fk_file_ticket_owner"),
     )
+
+
+class PdfImport(Entity, Base):
+    __tablename__ = "pdf_imports"
+    owner_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), index=True)
+    note_id: Mapped[uuid.UUID] = mapped_column()
+    source_file_id: Mapped[uuid.UUID] = mapped_column()
+    request_hash: Mapped[str] = mapped_column(String(64))
+    status: Mapped[str] = mapped_column(String(16), default="uploading")
+    page_count: Mapped[int | None] = mapped_column(Integer)
+    completed_pages: Mapped[int] = mapped_column(Integer, default=0)
+    error_code: Mapped[str | None] = mapped_column(String(64))
+    __table_args__ = (
+        UniqueConstraint("note_id", name="uq_pdf_import_note"),
+        UniqueConstraint("source_file_id", name="uq_pdf_import_source"),
+        ForeignKeyConstraint(["owner_id", "note_id"], ["notes.owner_id", "notes.id"], name="fk_pdf_note_owner"),
+        ForeignKeyConstraint(["owner_id", "source_file_id"], ["files.owner_id", "files.id"], name="fk_pdf_source_owner"),
+        CheckConstraint("completed_pages >= 0 AND (page_count IS NULL OR (page_count > 0 AND completed_pages <= page_count))", name="pdf_progress"),
+        CheckConstraint("status IN ('uploading','queued','processing','ready','rejected')", name="pdf_status"),
+    )

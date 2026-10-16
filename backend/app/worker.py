@@ -17,8 +17,11 @@ def stop(*_):
 
 def execute(job):
     log.info("job_started job_id=%s", job["id"])
-    if job["kind"] == "image.process":
-        from app.modules.files.service import process_job
+    if job["kind"] in {"image.process", "pdf.import"}:
+        if job["kind"] == "pdf.import":
+            from app.modules.files.pdf_service import process_job
+        else:
+            from app.modules.files.service import process_job
 
         stop_heartbeat = threading.Event()
 
