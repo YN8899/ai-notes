@@ -28,7 +28,7 @@ function AuthScreen() {
     <section className="auth-story"><div className="brand"><BookOpen size={28}/>知页 <span>AI NOTES</span></div><div><p className="eyebrow">你的知识，慢慢积累。</p><h1>让每一页笔记，<br/>成为下一次理解的起点。</h1><p>一个属于你和朋友的学习空间。<br/>记录思考，连接知识，一起往前走。</p></div><span className="story-footer">个人学习空间 · 邀请制</span></section>
     <section className="auth-form"><div className="mini-brand"><BookOpen/> 知页</div><p className="eyebrow">学习，从这里继续</p><h2>{title}</h2><p className="muted">{mode==='register'?'使用管理员提供的邀请码注册。':mode==='reset'?'输入管理员核实身份后提供的一次性凭证。':'登录后查看你的账户与学习空间。'}</p>
       <form onSubmit={submit} key={mode}>
-        {mode!=='reset'?<label>用户名<input name="username" required minLength={3} maxLength={32} pattern="[a-zA-Z0-9_-]+" autoComplete="username" placeholder="3–32 位字母、数字或下划线"/></label>:<label>重置凭证<input name="token" required minLength={20} maxLength={128} autoComplete="off"/></label>}
+        {mode!=='reset'?<label>用户名<input name="username" required minLength={3} maxLength={32} pattern="[a-zA-Z0-9_\-]+" autoComplete="username" placeholder="3–32 位字母、数字或下划线"/></label>:<label>重置凭证<input name="token" required minLength={20} maxLength={128} autoComplete="off"/></label>}
         {mode==='register'?<label>显示名称<input name="display_name" required maxLength={64} placeholder="朋友如何称呼你"/></label>:null}
         <label>{mode==='reset'?'新密码':'密码'}<input name="password" type="password" required minLength={mode==='login'?1:10} maxLength={128} autoComplete={mode==='login'?'current-password':'new-password'} placeholder={mode==='login'?'输入密码':'至少 10 位'}/></label>
         {mode==='register'?<label>邀请码<input name="invite_code" required minLength={20} maxLength={128} autoComplete="off" placeholder="粘贴管理员提供的邀请码"/></label>:null}
