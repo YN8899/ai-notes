@@ -23,9 +23,7 @@ certifi==2026.7.22
     #   httpx
     #   requests
 cffi==2.1.1
-    # via
-    #   argon2-cffi-bindings
-    #   cryptography
+    # via argon2-cffi-bindings
 charset-normalizer==3.5.2
     # via requests
 click==8.5.0
@@ -34,8 +32,6 @@ colorama==0.4.6 ; sys_platform == 'win32'
     # via pytest
 crcmod-plus==2.3.6
     # via alibabacloud-oss-v2
-cryptography==50.0.2
-    # via ai-notes-backend
 fastapi==0.143.0
     # via ai-notes-backend
 h11==0.16.0

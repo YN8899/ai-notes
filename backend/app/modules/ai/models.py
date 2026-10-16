@@ -10,6 +10,7 @@ from app.shared.models import Entity
 
 
 class AiCredential(Entity, Base):
+    # Preserve the schema for already-applied migrations; shared credentials are not stored here.
     __tablename__ = "ai_credentials"
 
     owner_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"))

@@ -1,6 +1,4 @@
 from functools import lru_cache
-import base64
-import binascii
 from typing import Literal
 import re
 from urllib.parse import urlsplit
@@ -36,20 +34,14 @@ class Settings(BaseSettings):
     oss_access_key_id: SecretStr = SecretStr("")
     oss_access_key_secret: SecretStr = SecretStr("")
     oss_security_token: SecretStr = SecretStr("")
-    ai_credential_encryption_key: SecretStr = SecretStr("")
+    deepseek_api_key: SecretStr = SecretStr("")
 
-    @field_validator("ai_credential_encryption_key")
+    @field_validator("deepseek_api_key")
     @classmethod
-    def validate_ai_encryption_key(cls, value):
+    def validate_deepseek_api_key(cls, value):
         raw = value.get_secret_value()
-        if not raw:
-            return value
-        try:
-            decoded = base64.b64decode((raw + "=" * (-len(raw) % 4)).encode("ascii"), altchars=b"-_", validate=True)
-        except (ValueError, UnicodeError, binascii.Error):
-            raise ValueError("AI credential encryption key must be a base64-encoded 32-byte secret") from None
-        if len(decoded) != 32:
-            raise ValueError("AI credential encryption key must be a base64-encoded 32-byte secret")
+        if raw and (not 16 <= len(raw) <= 512 or any(ord(character) < 33 or ord(character) > 126 for character in raw)):
+            raise ValueError("DeepSeek API Key must contain 16 to 512 visible ASCII characters")
         return value
 
     @model_validator(mode="after")

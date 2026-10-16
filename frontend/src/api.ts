@@ -9,8 +9,7 @@ export type LoginInput = components['schemas']['LoginIn']
 export type RegisterInput = components['schemas']['RegisterIn']
 export type ResetInput = components['schemas']['ResetIn']
 export type AiCatalog = components['schemas']['AiCatalogOut']
-export type AiCredential = components['schemas']['AiCredentialOut']
-export type AiProvider = components['schemas']['AiProviderOut']
+export type AiConnection = components['schemas']['AiConnectionOut']
 export class ApiError extends Error {
   constructor(public status:number, public code:string, message:string, public requestId:string) {super(message)}
 }

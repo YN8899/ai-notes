@@ -10,6 +10,8 @@ os.environ["APP_ORIGIN"] = "http://testserver"
 os.environ["RATE_LIMIT_REQUESTS"] = "1000"
 # A developer's private .env must never make the regression suite use real OSS.
 os.environ["STORAGE_BACKEND"] = "local"
+# Never let a developer's private shared model key reach regression tests.
+os.environ["DEEPSEEK_API_KEY"] = ""
 from app.shared.db import engine, SessionLocal, Base
 from app.shared.models import User
 from app.shared.security import hasher

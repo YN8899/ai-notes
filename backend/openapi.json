@@ -6268,24 +6268,20 @@
         }
       }
     },
-    "/api/v1/ai/credentials": {
-      "get": {
+    "/api/v1/ai/connection-test": {
+      "post": {
         "tags": [
           "ai"
         ],
-        "summary": "Credentials",
-        "operationId": "credentials_api_v1_ai_credentials_get",
+        "summary": "Test Connection",
+        "operationId": "test_connection_api_v1_ai_connection_test_post",
         "responses": {
           "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/AiCredentialOut"
-                  },
-                  "type": "array",
-                  "title": "Response Credentials Api V1 Ai Credentials Get"
+                  "$ref": "#/components/schemas/AiConnectionOut"
                 }
               }
             }
@@ -6382,412 +6378,21 @@
           }
         }
       }
-    },
-    "/api/v1/ai/credentials/{provider}": {
-      "put": {
-        "tags": [
-          "ai"
-        ],
-        "summary": "Save Credential",
-        "operationId": "save_credential_api_v1_ai_credentials__provider__put",
-        "parameters": [
-          {
-            "name": "provider",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Provider"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/AiCredentialWrite"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AiCredentialOut"
-                }
-              }
-            }
-          },
-          "400": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorOut"
-                }
-              }
-            },
-            "description": "Bad Request"
-          },
-          "401": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorOut"
-                }
-              }
-            },
-            "description": "Unauthorized"
-          },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorOut"
-                }
-              }
-            },
-            "description": "Forbidden"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorOut"
-                }
-              }
-            },
-            "description": "Not Found"
-          },
-          "409": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorOut"
-                }
-              }
-            },
-            "description": "Conflict"
-          },
-          "422": {
-            "description": "Unprocessable Content",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorOut"
-                }
-              }
-            }
-          },
-          "429": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorOut"
-                }
-              }
-            },
-            "description": "Too Many Requests"
-          },
-          "500": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorOut"
-                }
-              }
-            },
-            "description": "Internal Server Error"
-          },
-          "503": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorOut"
-                }
-              }
-            },
-            "description": "Service Unavailable"
-          }
-        }
-      }
-    },
-    "/api/v1/ai/credentials/{credential_id}": {
-      "delete": {
-        "tags": [
-          "ai"
-        ],
-        "summary": "Delete Credential",
-        "operationId": "delete_credential_api_v1_ai_credentials__credential_id__delete",
-        "parameters": [
-          {
-            "name": "credential_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid",
-              "title": "Credential Id"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/AiCredentialRevision"
-              }
-            }
-          }
-        },
-        "responses": {
-          "204": {
-            "description": "Successful Response"
-          },
-          "400": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorOut"
-                }
-              }
-            },
-            "description": "Bad Request"
-          },
-          "401": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorOut"
-                }
-              }
-            },
-            "description": "Unauthorized"
-          },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorOut"
-                }
-              }
-            },
-            "description": "Forbidden"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorOut"
-                }
-              }
-            },
-            "description": "Not Found"
-          },
-          "409": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorOut"
-                }
-              }
-            },
-            "description": "Conflict"
-          },
-          "422": {
-            "description": "Unprocessable Content",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorOut"
-                }
-              }
-            }
-          },
-          "429": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorOut"
-                }
-              }
-            },
-            "description": "Too Many Requests"
-          },
-          "500": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorOut"
-                }
-              }
-            },
-            "description": "Internal Server Error"
-          },
-          "503": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorOut"
-                }
-              }
-            },
-            "description": "Service Unavailable"
-          }
-        }
-      }
-    },
-    "/api/v1/ai/credentials/{credential_id}/test": {
-      "post": {
-        "tags": [
-          "ai"
-        ],
-        "summary": "Test Credential",
-        "operationId": "test_credential_api_v1_ai_credentials__credential_id__test_post",
-        "parameters": [
-          {
-            "name": "credential_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid",
-              "title": "Credential Id"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/AiCredentialRevision"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AiCredentialOut"
-                }
-              }
-            }
-          },
-          "400": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorOut"
-                }
-              }
-            },
-            "description": "Bad Request"
-          },
-          "401": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorOut"
-                }
-              }
-            },
-            "description": "Unauthorized"
-          },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorOut"
-                }
-              }
-            },
-            "description": "Forbidden"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorOut"
-                }
-              }
-            },
-            "description": "Not Found"
-          },
-          "409": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorOut"
-                }
-              }
-            },
-            "description": "Conflict"
-          },
-          "422": {
-            "description": "Unprocessable Content",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorOut"
-                }
-              }
-            }
-          },
-          "429": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorOut"
-                }
-              }
-            },
-            "description": "Too Many Requests"
-          },
-          "500": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorOut"
-                }
-              }
-            },
-            "description": "Internal Server Error"
-          },
-          "503": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorOut"
-                }
-              }
-            },
-            "description": "Service Unavailable"
-          }
-        }
-      }
     }
   },
   "components": {
     "schemas": {
       "AiCatalogOut": {
         "properties": {
-          "storage_ready": {
-            "type": "boolean",
-            "title": "Storage Ready"
+          "credential_source": {
+            "type": "string",
+            "const": "shared",
+            "title": "Credential Source",
+            "default": "shared"
           },
           "platform_enabled": {
             "type": "boolean",
-            "const": false,
-            "title": "Platform Enabled",
-            "default": false
+            "title": "Platform Enabled"
           },
           "providers": {
             "items": {
@@ -6799,78 +6404,25 @@
         },
         "type": "object",
         "required": [
-          "storage_ready",
+          "platform_enabled",
           "providers"
         ],
         "title": "AiCatalogOut"
       },
-      "AiCredentialOut": {
+      "AiConnectionOut": {
         "properties": {
-          "id": {
+          "status": {
             "type": "string",
-            "format": "uuid",
-            "title": "Id"
-          },
-          "provider": {
-            "type": "string",
-            "title": "Provider"
-          },
-          "masked_key": {
-            "type": "string",
-            "title": "Masked Key"
-          },
-          "revision": {
-            "type": "integer",
-            "title": "Revision"
-          },
-          "created_at": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Created At"
-          },
-          "updated_at": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Updated At"
-          },
-          "last_tested_at": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
+            "enum": [
+              "valid",
+              "invalid",
+              "unavailable"
             ],
-            "title": "Last Tested At"
+            "title": "Status"
           },
-          "test_status": {
-            "anyOf": [
-              {
-                "type": "string",
-                "enum": [
-                  "valid",
-                  "invalid",
-                  "unavailable"
-                ]
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Test Status"
-          },
-          "test_code": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Test Code"
+          "code": {
+            "type": "string",
+            "title": "Code"
           },
           "available_models": {
             "items": {
@@ -6882,63 +6434,11 @@
         },
         "type": "object",
         "required": [
-          "id",
-          "provider",
-          "masked_key",
-          "revision",
-          "created_at",
-          "updated_at",
-          "last_tested_at",
-          "test_status",
-          "test_code",
+          "status",
+          "code",
           "available_models"
         ],
-        "title": "AiCredentialOut"
-      },
-      "AiCredentialRevision": {
-        "properties": {
-          "revision": {
-            "type": "integer",
-            "minimum": 1.0,
-            "title": "Revision"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "revision"
-        ],
-        "title": "AiCredentialRevision"
-      },
-      "AiCredentialWrite": {
-        "properties": {
-          "api_key": {
-            "type": "string",
-            "maxLength": 512,
-            "minLength": 16,
-            "format": "password",
-            "title": "Api Key",
-            "writeOnly": true
-          },
-          "revision": {
-            "anyOf": [
-              {
-                "type": "integer",
-                "minimum": 1.0
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Revision"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "api_key"
-        ],
-        "title": "AiCredentialWrite"
+        "title": "AiConnectionOut"
       },
       "AiModelOut": {
         "properties": {
