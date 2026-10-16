@@ -71,6 +71,8 @@ def page_output(db, page):
 
 def create_upload(db, user, note_id, data):
     image_note(db, user, note_id)
+    from app.modules.files.pdf_service import require_idle
+    require_idle(db, note_id)
     cfg = settings()
     storage()  # Fail before reserving data if the selected adapter is not ready.
     if data.size > cfg.upload_max_bytes:
@@ -127,6 +129,10 @@ def receive_upload(db, user, upload_id, data, mime):
 def complete_upload(db, user, upload_id, revision):
     upload = owned_upload(db, user, upload_id)
     note = image_note(db, user, upload.note_id)
+    from app.modules.files.pdf_service import require_idle
+    if db.get(File, upload.file_id).mime == "application/pdf":
+        raise AppError(422, "pdf_import_required", "请通过 PDF 导入接口开始转换")
+    require_idle(db, note.id)
     if upload.status == "completed":
         page = db.scalar(select(NotePage).where(NotePage.note_id == note.id, NotePage.file_id == upload.file_id))
         return page, note.revision
@@ -164,6 +170,8 @@ def list_pages(db, user, note_id):
 
 def reorder_pages(db, user, note_id, data):
     note = image_note(db, user, note_id)
+    from app.modules.files.pdf_service import require_idle
+    require_idle(db, note_id)
     notes.revision_matches(note, data.revision)
     pages = list_pages(db, user, note_id)
     if len(set(data.page_ids)) != len(data.page_ids) or set(data.page_ids) != {p.id for p in pages}:
@@ -190,7 +198,12 @@ def linked_file(db, user, file_id):
         NotePage.file_id == file.id, NotePage.owner_id == user.id,
         Note.owner_id == user.id, Note.deleted_at.is_(None)).limit(1))
     if not linked:
-        raise AppError(404, "not_found", "图片不存在或无权访问")
+        from app.modules.files.models import PdfImport
+        linked = db.scalar(select(PdfImport.id).join(Note, PdfImport.note_id == Note.id).where(
+            PdfImport.source_file_id == file.id, PdfImport.owner_id == user.id,
+            Note.owner_id == user.id, Note.deleted_at.is_(None)).limit(1))
+        if not linked:
+            raise AppError(404, "not_found", "文件不存在或无权访问")
     return file
 
 
@@ -213,7 +226,9 @@ def retry_file(db, user, file_id):
 
 
 def create_ticket(db, user, file_id, kind):
-    accessible_file(db, user, file_id)
+    file = accessible_file(db, user, file_id)
+    if file.mime == "application/pdf" and kind != "original":
+        raise AppError(422, "pdf_original_only", "PDF 原件仅支持下载原文件")
     raw = token()
     expires = utcnow() + timedelta(seconds=settings().file_ticket_seconds)
     db.add(FileTicket(owner_id=user.id, file_id=file_id, token_hash=digest(raw), expires_at=expires))

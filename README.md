@@ -11,6 +11,7 @@ M1 开发中，版本 0.1.0。手机和电脑共用 React 前端，后端为 Fas
 - 文件夹、笔记本、标签与私人笔记，自动保存、版本冲突提示、历史版本和回收站。
 - Tiptap 富文本、公式、代码块、Markdown 导入与本机草稿恢复。
 - 图片笔记批量预览、排序、上传、后台生成阅读图和缩略图、失败重试与缩放阅读器。
+- PDF 导入为多页图片笔记，保留原件、显示后台逐页进度，支持断点重试与原件下载；默认 50 MiB / 200 页。
 - 私有 OSS 官方 SDK 适配器与权限校验后的图片代理；开发环境可使用本地私有存储。
 - 管理员在本机后端统一配置 DeepSeek Key，所有登录成员共用；受控能力表与管理员手动连接测试，网页不显示或收集个人 Key。
 - 持久任务队列、去重、租约续期、过期回收、退避重试和失败任务人工重试。
@@ -138,6 +139,7 @@ Outbox 将业务变更和事件保存在同一个数据库事务，通知投递�
 | OSS_REGION / OSS_BUCKET / OSS_ENDPOINT / OSS_PREFIX | 当前杭州私有 Bucket；默认区域 HTTPS Endpoint，专用 ai-notes/ 前缀 |
 | OSS_ACCESS_KEY_ID / OSS_ACCESS_KEY_SECRET / OSS_SECURITY_TOKEN | 仅注入服务端；长期 AccessKey 不填 security token；真实值禁止提交 |
 | DEEPSEEK_API_KEY | 仅后端持有的共享 DeepSeek Key，所有登录成员共用；留空时模型服务不可用，笔记功能继续正常 |
+| PDF_MAX_BYTES / PDF_MAX_PAGES / PDF_PAGE_TIMEOUT_SECONDS | PDF 默认 50 MiB、200 页、每次打开/逐页渲染 60 秒；详细说明见 [PDF 导入配置](docs/PDF笔记导入与逐页转换.md) |
 
 `compose.yaml` 是本地构建开发配置；`compose.server.yaml` 是从 ACR 拉取镜像的 Ubuntu 私有开发联调配置，使用独立 `.env.server`。两者均只绑定本机 8080，数据库和 API 无公网映射。服务器联调通过 SSH 隧道访问；正式域名、HTTPS、备份恢复及生产配置另行验收，ACR 个人版不用于正式生产业务。
 
@@ -146,6 +148,8 @@ Outbox 将业务变更和事件保存在同一个数据库事务，通知投递�
 标准错误响应包含 code、message、request_id。日志不记录 Cookie、密码、邀请码、重置凭证、请求正文或签名 URL。停用用户阻止新访问并撤销会话；不把停用误当成删除用户数据。
 
 ## 当前验证范围
+
+2026-10-16 PDF 导入：后端全量 110 项、配置 6 项、自动保存回归与前端构建通过。真实本机网页上传中文三页 PDF、Worker 渲染、刷新继续、原页序/缩放、原件下载比对和加密文件提示均通过。使用见 [PDF笔记导入与逐页转换](docs/PDF笔记导入与逐页转换.md)，证据见 [本次验收](docs/task-evidence/2026-10-16-pdf-import.md)；真实 OSS PDF 和 ECS 部署未验收。
 
 2026-10-16：按用户要求改为本机后端统一持有共享 DeepSeek Key；隔离 PostgreSQL 后端回归 94 项、配置脚本测试 6 项、自动保存回归与前端构建通过。桌面和手机尺寸检查通过，真实官方模型列表连接成功，浏览器未持有 Key。聊天生成仍未实现。证据见 [共享 Key 验收记录](docs/task-evidence/2026-10-16-shared-deepseek.md)。
 

@@ -79,6 +79,8 @@ pydantic-core==2.50.1
     # via pydantic
 pydantic-settings==2.15.0
     # via ai-notes-backend
+pypdfium2==5.14.0
+    # via ai-notes-backend
 pytest==8.3.5
 python-dotenv==1.2.4
     # via
