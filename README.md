@@ -12,11 +12,12 @@ M1 开发中，版本 0.1.0。手机和电脑共用 React 前端，后端为 Fas
 - Tiptap 富文本、公式、代码块、Markdown 导入与本机草稿恢复。
 - 图片笔记批量预览、排序、上传、后台生成阅读图和缩略图、失败重试与缩放阅读器。
 - 私有 OSS 官方 SDK 适配器与权限校验后的图片代理；开发环境可使用本地私有存储。
+- 个人 DeepSeek Key 加密保存、替换、删除与手动连接测试；受控模型能力表，平台公共 Key 保持关闭。
 - 持久任务队列、去重、租约续期、过期回收、退避重试和失败任务人工重试。
 - 事务 Outbox 和幂等站内通知投递；可在网页发起后台自检并查看真实结果。
 - Alembic 初始迁移、OpenAPI 与生成的 TypeScript 类型、依赖锁文件、Docker Compose 和 GitHub Actions CI。
 
-当前暂用“私有 OSS + 后端图片代理”，无需 OSS 图片自定义域名。配置见 [OSS私有存储与图片代理配置](docs/OSS私有存储与图片代理配置.md)。ECS 已更换为 Ubuntu 24.04，采用 GitHub 获取代码、GitHub Actions 构建、杭州 ACR 个人版分发镜像和 Compose 私有开发联调，步骤见 [Ubuntu服务器部署与运维](docs/Ubuntu服务器部署与运维.md)；进度见 [M1开发与云端验收计划](docs/M1开发与云端验收计划.md)。真实 OSS SDK 联调与本机网页上传 → Worker 生成阅读图/缩略图 → 后端代理阅读已通过。ECS 应用部署和完整 M1 尚未验收。AI API 调用、OCR、复习、聊天与社区仍未开放，当前不需要模型 Key。
+当前暂用“私有 OSS + 后端图片代理”，无需 OSS 图片自定义域名。配置见 [OSS私有存储与图片代理配置](docs/OSS私有存储与图片代理配置.md)。ECS 已更换为 Ubuntu 24.04，采用 GitHub 获取代码、GitHub Actions 构建、杭州 ACR 个人版分发镜像和 Compose 私有开发联调，步骤见 [Ubuntu服务器部署与运维](docs/Ubuntu服务器部署与运维.md)；进度见 [M1开发与云端验收计划](docs/M1开发与云端验收计划.md)。真实 OSS SDK 联调与本机网页上传 → Worker 生成阅读图/缩略图 → 后端代理阅读已通过。ECS 应用部署和完整 M1 尚未验收。个人模型配置已开放，启用方式见 [个人模型Key与DeepSeek配置](docs/个人模型Key与DeepSeek配置.md)；聊天生成、OCR、复习与社区仍未开放，笔记功能不依赖模型 Key。
 
 ## 本地启动
 
@@ -109,6 +110,7 @@ npm run build
 | backend/app/modules/jobs | 后台任务、通知与队列服务 |
 | backend/app/modules/notes | 笔记组织、正文、版本、回收站 |
 | backend/app/modules/files | 私有存储、上传会话、图片处理与代理 |
+| backend/app/modules/ai | 个人模型凭据、受控能力表与连接测试 |
 | backend/app/shared | 配置、事务、模型、错误、安全与权限 |
 | backend/app/worker.py | 独立后台任务入口 |
 | backend/alembic | 可审查、可执行的数据库迁移 |
@@ -135,6 +137,7 @@ Outbox 将业务变更和事件保存在同一个数据库事务，通知投递�
 | STORAGE_BACKEND / STORAGE_ROOT | 开发默认 local；API 与 Worker 使用同一目录，Compose 配置共享 filesdata 卷 |
 | OSS_REGION / OSS_BUCKET / OSS_ENDPOINT / OSS_PREFIX | 当前杭州私有 Bucket；默认区域 HTTPS Endpoint，专用 ai-notes/ 前缀 |
 | OSS_ACCESS_KEY_ID / OSS_ACCESS_KEY_SECRET / OSS_SECURITY_TOKEN | 仅注入服务端；长期 AccessKey 不填 security token；真实值禁止提交 |
+| AI_CREDENTIAL_ENCRYPTION_KEY | 可选的 32 字节主加密密钥；用 scripts/init_ai_secret.py 生成到私密配置，并独立备份；留空时禁用个人 Key 保存与测试 |
 
 `compose.yaml` 是本地构建开发配置；`compose.server.yaml` 是从 ACR 拉取镜像的 Ubuntu 私有开发联调配置，使用独立 `.env.server`。两者均只绑定本机 8080，数据库和 API 无公网映射。服务器联调通过 SSH 隧道访问；正式域名、HTTPS、备份恢复及生产配置另行验收，ACR 个人版不用于正式生产业务。
 
@@ -143,6 +146,8 @@ Outbox 将业务变更和事件保存在同一个数据库事务，通知投递�
 标准错误响应包含 code、message、request_id。日志不记录 Cookie、密码、邀请码、重置凭证、请求正文或签名 URL。停用用户阻止新访问并撤销会话；不把停用误当成删除用户数据。
 
 ## 当前验证范围
+
+2026-10-16：个人模型配置的隔离 PostgreSQL 后端回归 101 项、配置脚本测试 10 项、自动保存回归与前端构建通过；桌面和手机尺寸完成 Key 保存、替换、删除及模拟连接状态验证。未使用真实 DeepSeek Key，模型列表实连与聊天生成尚未验收。证据见 [DeepSeek 凭据验收记录](docs/task-evidence/2026-10-16-deepseek-credentials.md)。
 
 2026-10-14：隔离原生 PostgreSQL 后端 68 项测试通过，Alembic 升级与 check 通过；自动保存延迟请求回归 1 项通过；前端 TypeScript 与生产构建通过。OSS 测试使用替身客户端，不能作为真实 Bucket 验收。富文本编辑器的独立构建块仍有体积提示。
 

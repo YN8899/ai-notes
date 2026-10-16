@@ -1,8 +1,10 @@
 from functools import lru_cache
+import base64
+import binascii
 from typing import Literal
 import re
 from urllib.parse import urlsplit
-from pydantic import SecretStr, model_validator
+from pydantic import SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -34,6 +36,21 @@ class Settings(BaseSettings):
     oss_access_key_id: SecretStr = SecretStr("")
     oss_access_key_secret: SecretStr = SecretStr("")
     oss_security_token: SecretStr = SecretStr("")
+    ai_credential_encryption_key: SecretStr = SecretStr("")
+
+    @field_validator("ai_credential_encryption_key")
+    @classmethod
+    def validate_ai_encryption_key(cls, value):
+        raw = value.get_secret_value()
+        if not raw:
+            return value
+        try:
+            decoded = base64.b64decode((raw + "=" * (-len(raw) % 4)).encode("ascii"), altchars=b"-_", validate=True)
+        except (ValueError, UnicodeError, binascii.Error):
+            raise ValueError("AI credential encryption key must be a base64-encoded 32-byte secret") from None
+        if len(decoded) != 32:
+            raise ValueError("AI credential encryption key must be a base64-encoded 32-byte secret")
+        return value
 
     @model_validator(mode="after")
     def validate_production(self):
