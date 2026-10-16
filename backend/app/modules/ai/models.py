@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Integer, LargeBinary, String, UniqueConstraint
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, ForeignKeyConstraint, Index, Integer, LargeBinary, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -32,4 +32,40 @@ class AiCredential(Entity, Base):
         CheckConstraint("revision > 0 AND key_version > 0", name="ai_credential_versions"),
         CheckConstraint("octet_length(ciphertext) > 28", name="ai_credential_ciphertext"),
         CheckConstraint("test_status IS NULL OR test_status IN ('valid','invalid','unavailable')", name="ai_credential_test_status"),
+    )
+
+
+class AiConversation(Entity, Base):
+    __tablename__ = "ai_conversations"
+    owner_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), index=True)
+    title: Mapped[str] = mapped_column(String(64), default="新对话")
+    request_key: Mapped[uuid.UUID] = mapped_column()
+    __table_args__ = (
+        UniqueConstraint("owner_id", "request_key", name="uq_ai_conversation_request"),
+        UniqueConstraint("owner_id", "id", name="uq_ai_conversation_owner"),
+    )
+
+
+class AiRun(Entity, Base):
+    # One row is one immutable user turn and its progressively persisted answer.
+    __tablename__ = "ai_runs"
+    owner_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"))
+    conversation_id: Mapped[uuid.UUID] = mapped_column()
+    request_key: Mapped[uuid.UUID] = mapped_column()
+    request_hash: Mapped[str] = mapped_column(String(64))
+    model: Mapped[str] = mapped_column(String(64))
+    prompt: Mapped[str] = mapped_column(Text)
+    input_messages: Mapped[list] = mapped_column(JSONB)
+    answer: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[str] = mapped_column(String(16), default="queued")
+    usage: Mapped[dict | None] = mapped_column(JSONB)
+    error_code: Mapped[str | None] = mapped_column(String(64))
+    lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    __table_args__ = (
+        ForeignKeyConstraint(["owner_id", "conversation_id"], ["ai_conversations.owner_id", "ai_conversations.id"], name="fk_ai_run_conversation_owner"),
+        UniqueConstraint("owner_id", "request_key", name="uq_ai_run_request"),
+        CheckConstraint("status IN ('queued','running','succeeded','cancelled','interrupted','failed','truncated')", name="ai_run_status"),
+        Index("ix_ai_runs_conversation", "owner_id", "conversation_id", "created_at"),
+        Index("ix_ai_runs_claim", "status", "created_at"),
     )

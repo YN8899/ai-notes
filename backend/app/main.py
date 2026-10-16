@@ -17,6 +17,7 @@ from app.modules.files.router import router as files_router
 from app.modules.files.pdf_router import router as pdf_router
 from app.modules.notes.router import router as notes_router
 from app.modules.ai.router import router as ai_router
+from app.modules.ai.chat_router import router as chat_router
 
 log = logging.getLogger("notes.api")
 app = FastAPI(title="AI Notes M0", version="0.1.0")
@@ -96,3 +97,4 @@ app.include_router(files_router, prefix="/api/v1", responses=errors)
 app.include_router(pdf_router, prefix="/api/v1", responses={**errors, 503: {"model": ErrorOut}})
 app.include_router(notes_router, prefix="/api/v1", responses=errors)
 app.include_router(ai_router, prefix="/api/v1", responses={**errors, 503: {"model": ErrorOut}})
+app.include_router(chat_router, prefix="/api/v1", responses={**errors, 503: {"model": ErrorOut}})
