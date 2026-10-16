@@ -7,13 +7,45 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from starlette.concurrency import run_in_threadpool
 
-from app.modules.ai import chat_service as service, schemas as s
+from app.modules.ai import chat_service as service, pdf_context, schemas as s
 from app.modules.ai.models import AiConversation, AiRun
+from app.modules.files.models import PdfImport
+from app.modules.notes.models import Note
 from app.shared.db import utcnow
 from app.shared.dependencies import CurrentUser, DB
 from app.shared.errors import AppError
 
 router = APIRouter(tags=["ai-chat"])
+
+
+@router.get("/ai/pdf-notebooks", response_model=list[s.PdfNotebookOut])
+def pdf_notebooks(db: DB, user: CurrentUser):
+    records = db.execute(select(Note, PdfImport).join(PdfImport, PdfImport.note_id == Note.id).where(
+        Note.owner_id == user.id, PdfImport.owner_id == user.id, Note.deleted_at.is_(None), PdfImport.status == "ready")
+        .order_by(Note.updated_at.desc()).limit(100))
+    return [s.PdfNotebookOut(id=note.id, title=note.title, revision=note.revision, page_count=item.page_count) for note, item in records]
+
+
+@router.get("/ai/pdf-notebooks/{note_id}", response_model=s.PdfNotebookDetail)
+def pdf_notebook(note_id: UUID, db: DB, user: CurrentUser):
+    return pdf_context.detail(db, user.id, note_id)
+
+
+@router.post("/ai/pdf-preview", response_model=s.PdfPreviewOut)
+def preview(data: s.PdfInput, db: DB, user: CurrentUser):
+    return pdf_context.preview(db, user.id, data)
+
+
+@router.get("/ai/runs/{run_id}/source-pages/{page_id}", response_model=s.SourcePageOut)
+def source_page(run_id: UUID, page_id: UUID, db: DB, user: CurrentUser):
+    row = service.get_run(db, user.id, run_id)
+    source = row.source
+    page = next((page for page in source["pages"] if page["page_id"] == str(page_id)), None) if source else None
+    if not page:
+        raise AppError(404, "source_not_found", "这次回答没有引用此页")
+    note = pdf_context.validate(db, user.id, source)
+    return s.SourcePageOut(file_id=page["file_id"], title=source["title"], page_number=page["number"],
+                           source_revision=source["revision"], source_changed=note.revision != source["revision"])
 
 
 @router.get("/ai/conversations", response_model=list[s.ConversationOut])
@@ -84,9 +116,10 @@ def events(run_id: UUID, request: Request, db: DB, user: CurrentUser):
             if len(current.answer) > offset:
                 yield event("delta", {"offset": offset, "text": current.answer[offset:]})
                 offset = len(current.answer)
-            state = (current.status, current.usage, current.error_code)
+            state = (current.status, current.usage, current.error_code, current.progress)
             if state != last_state:
-                yield event("state", {"status": current.status, "usage": current.usage, "error_code": current.error_code})
+                yield event("state", {"status": current.status, "usage": current.usage, "error_code": current.error_code,
+                                      "progress": current.progress.model_dump(mode="json") if current.progress else None})
                 last_state = state
             if current.status not in service.ACTIVE:
                 yield event("done", current.model_dump(mode="json"))

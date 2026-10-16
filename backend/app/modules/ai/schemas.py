@@ -2,7 +2,7 @@ from typing import Literal
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, field_validator, model_validator
 
 
 class AiModelOut(BaseModel):
@@ -44,12 +44,84 @@ class ConversationOut(BaseModel):
     created_at: datetime
 
 
+class PdfInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    note_id: UUID
+    revision: int = Field(strict=True, ge=1)
+    mode: Literal["pages", "all"]
+    page_numbers: list[StrictInt] = Field(default_factory=list, max_length=200)
+
+    @model_validator(mode="after")
+    def valid_pages(self):
+        if self.mode == "all" and self.page_numbers or self.mode == "pages" and not self.page_numbers:
+            raise ValueError("Choose all pages or a nonempty explicit selection")
+        if any(type(n) is not int or not 1 <= n <= 200 for n in self.page_numbers) or len(set(self.page_numbers)) != len(self.page_numbers):
+            raise ValueError("Page numbers must be unique integers between 1 and 200")
+        return self
+
+
+class PdfPageRef(BaseModel):
+    page_id: UUID
+    number: int
+
+
+class PdfSourceOut(BaseModel):
+    # Intentionally excludes internal object keys, file IDs and storage metadata.
+    note_id: UUID
+    revision: int
+    title: str
+    mode: Literal["pages", "all"]
+    pages: list[PdfPageRef]
+
+
+class PdfProgress(BaseModel):
+    stage: Literal["queued", "reading", "reducing", "answering", "done"]
+    completed_pages: int
+    total_pages: int
+    completed_batches: int
+    total_batches: int
+    call_count: int
+    planned_calls: int
+    current_pages: list[int] = Field(default_factory=list)
+    usage_complete: bool = False
+
+
+class PdfNotebookOut(BaseModel):
+    id: UUID
+    title: str
+    revision: int
+    page_count: int
+
+
+class PdfNotebookPage(PdfPageRef):
+    bytes: int
+
+
+class PdfNotebookDetail(PdfNotebookOut):
+    pages: list[PdfNotebookPage]
+
+
+class PdfPreviewOut(BaseModel):
+    source: PdfSourceOut
+    batches: list[list[int]]
+    planned_calls: int
+
+
+class SourcePageOut(BaseModel):
+    file_id: UUID
+    title: str
+    page_number: int
+    source_revision: int
+    source_changed: bool
+
+
 class RunCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
     request_key: UUID
     previous_run_id: UUID | None = None
     model: Literal["deepseek-flash", "deepseek-v4-pro"] = "deepseek-flash"
     prompt: str = Field(min_length=1, max_length=8000)
+    pdf: PdfInput | None = None
 
     @field_validator("prompt")
     @classmethod
@@ -73,6 +145,8 @@ class RunOut(BaseModel):
     error_code: str | None
     created_at: datetime
     finished_at: datetime | None
+    source: PdfSourceOut | None = None
+    progress: PdfProgress | None = None
 
 
 class ConversationDetail(ConversationOut):

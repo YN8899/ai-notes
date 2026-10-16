@@ -236,7 +236,7 @@ def process_job(claimed):
                     db.add(file)
                     db.flush()
                     db.add(NotePage(owner_id=item.owner_id, note_id=item.note_id, file_id=file_id,
-                                    position=event["index"]))
+                                    position=event["index"], pdf_page_number=event["index"] + 1))
                     db.add_all(FileVariant(file_id=file_id, kind=kind, object_key=object_key, bytes=size)
                                for kind, object_key, size in written[1:])
                     item.completed_pages += 1

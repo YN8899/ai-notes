@@ -37,7 +37,7 @@ function AuthScreen() {
         <ErrorMessage error={mutation.error}/><button className="primary full" disabled={mutation.isPending}>{mutation.isPending?'正在处理…':mode==='login'?'登录学习空间':mode==='register'?'创建账户':'重置密码'}<ArrowUpRight size={18}/></button>
       </form>
       <div className="auth-links">{(['login','register','reset'] as const).filter(x=>x!==mode).map(x=><button className="text-button" key={x} onClick={()=>{setMode(x);mutation.reset()}}>{x==='login'?'返回登录':x==='register'?'使用邀请码注册':'忘记密码'}</button>)}</div>
-      <p className="auth-note">当前已开放笔记与 AI 文字对话。使用邀请码加入学习空间。</p>
+      <p className="auth-note">当前已开放笔记与 AI 文字 / PDF 对话。使用邀请码加入学习空间。</p>
     </section>
   </main>
 }
@@ -84,7 +84,7 @@ function Home({user,onGo}:{user:User;onGo:(s:Section)=>void}) {
   const read=useMutation({mutationFn:(id:string)=>api('/notifications/'+id+'/read','POST',{}),onSuccess:()=>client.invalidateQueries({queryKey:['notices']})})
   return <><section className="welcome"><div><p className="eyebrow">一起积累，持续理解</p><h2>{user.display_name}，欢迎来到知页。</h2><p>你的笔记空间已经准备好。新建一页，记录正在学习的想法。</p><button className="primary" onClick={()=>onGo('notes')}>打开我的笔记<ArrowUpRight size={17}/></button></div><div className="welcome-mark" aria-hidden="true"><BookOpen size={100} strokeWidth={1}/><span>每一页，都算数。</span></div></section>
     <div className="status-grid"><div className="status-card"><ShieldCheck/><span>账户身份</span><strong>{user.role==='admin'?'管理员':'学习成员'}</strong><small>邀请制 · 私人空间</small></div><div className="status-card"><Activity/><span>系统连接</span><strong>{ready.isPending?'检查中':ready.isError?'暂不可用':'正常'}</strong><small>账户与数据库服务</small></div><div className="status-card"><KeyRound/><span>模型服务</span><strong>统一配置</strong><small>登录成员共用 · 模型设置查看状态</small></div></div>
-    <div className="home-grid"><div className="panel"><div className="panel-heading"><h3>空间建设进度</h3><span className="badge active">基础已就绪</span></div><p className="muted">按阶段开放，让每个功能都能真正使用。</p>{[{n:'01',t:'账户与系统基础',s:'已完成',done:true},{n:'02',t:'笔记管理与 AI 对话',s:'笔记与文字对话已开放',done:false},{n:'03',t:'搜索、卡片与复习',s:'规划中',done:false},{n:'04',t:'好友与学习社区',s:'规划中',done:false}].map(x=><div className="roadmap-row" key={x.n}><span className={x.done?'step done':'step'}>{x.done?<Check size={16}/>:x.n}</span><strong>{x.t}</strong><span className="muted">{x.s}</span></div>)}</div>
+    <div className="home-grid"><div className="panel"><div className="panel-heading"><h3>空间建设进度</h3><span className="badge active">基础已就绪</span></div><p className="muted">按阶段开放，让每个功能都能真正使用。</p>{[{n:'01',t:'账户与系统基础',s:'已完成',done:true},{n:'02',t:'笔记管理与 AI 对话',s:'笔记与 PDF 对话已开放',done:false},{n:'03',t:'搜索、卡片与复习',s:'规划中',done:false},{n:'04',t:'好友与学习社区',s:'规划中',done:false}].map(x=><div className="roadmap-row" key={x.n}><span className={x.done?'step done':'step'}>{x.done?<Check size={16}/>:x.n}</span><strong>{x.t}</strong><span className="muted">{x.s}</span></div>)}</div>
     <div className="panel"><div className="panel-heading"><h3>最近通知</h3><Bell size={19}/></div><ErrorMessage error={notices.error||read.error}/>{notices.data?.length?notices.data.map(n=><div className="notice" key={n.id}><span className={'notice-dot '+(n.read_at?'read':'')}/><div><strong>{n.message}</strong><small>{date(n.created_at)}</small></div>{!n.read_at?<button className="text-button" disabled={read.isPending} onClick={()=>read.mutate(n.id)}>已读</button>:null}</div>):<Empty>这里会显示后台任务和学习提醒。<button className="text-button" onClick={()=>onGo('jobs')}>运行一次后台自检 <ChevronRight size={15}/></button></Empty>}</div></div>
   </>
 }

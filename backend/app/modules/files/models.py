@@ -52,11 +52,14 @@ class NotePage(Entity, Base):
     file_id: Mapped[uuid.UUID] = mapped_column()
     position: Mapped[int] = mapped_column(Integer)
     revision: Mapped[int] = mapped_column(Integer, default=1)
+    pdf_page_number: Mapped[int | None] = mapped_column(Integer)
     __table_args__ = (
         ForeignKeyConstraint(["owner_id", "note_id"], ["notes.owner_id", "notes.id"], name="fk_page_note_owner"),
         ForeignKeyConstraint(["owner_id", "file_id"], ["files.owner_id", "files.id"], name="fk_page_file_owner"),
         UniqueConstraint("note_id", "file_id", name="uq_note_page_file"),
         UniqueConstraint("note_id", "position", name="uq_note_page_position"),
+        UniqueConstraint("note_id", "pdf_page_number", name="uq_note_pdf_page_number"),
+        CheckConstraint("pdf_page_number IS NULL OR pdf_page_number > 0", name="pdf_page_number_positive"),
         CheckConstraint("position >= 0 AND revision > 0", name="page_position_revision"),
     )
 
