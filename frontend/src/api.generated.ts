@@ -833,6 +833,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/ai/image-notebooks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Image Notebooks */
+        get: operations["image_notebooks_api_v1_ai_image_notebooks_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/ai/image-notebooks/{note_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Image Notebook */
+        get: operations["image_notebook_api_v1_ai_image_notebooks__note_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/ai/image-preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Image Preview */
+        post: operations["image_preview_api_v1_ai_image_preview_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/ai/pdf-notebooks": {
         parameters: {
             query?: never;
@@ -1320,6 +1371,136 @@ export interface components {
             /** Status */
             status: string;
         };
+        /** ImageInput */
+        ImageInput: {
+            /**
+             * Note Id
+             * Format: uuid
+             */
+            note_id: string;
+            /** Revision */
+            revision: number;
+            /**
+             * Page Id
+             * Format: uuid
+             */
+            page_id: string;
+            region?: components["schemas"]["ImageRegion"] | null;
+        };
+        /** ImageNotebookDetail */
+        ImageNotebookDetail: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Title */
+            title: string;
+            /** Revision */
+            revision: number;
+            /** Page Count */
+            page_count: number;
+            /** Pages */
+            pages: components["schemas"]["ImageNotebookPage"][];
+        };
+        /** ImageNotebookOut */
+        ImageNotebookOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Title */
+            title: string;
+            /** Revision */
+            revision: number;
+            /** Page Count */
+            page_count: number;
+        };
+        /** ImageNotebookPage */
+        ImageNotebookPage: {
+            /**
+             * Page Id
+             * Format: uuid
+             */
+            page_id: string;
+            /** Number */
+            number: number;
+            region?: components["schemas"]["ImageRegion"] | null;
+            /**
+             * File Id
+             * Format: uuid
+             */
+            file_id: string;
+            /** Page Revision */
+            page_revision: number;
+            /** Bytes */
+            bytes: number;
+        };
+        /** ImagePageRef */
+        ImagePageRef: {
+            /**
+             * Page Id
+             * Format: uuid
+             */
+            page_id: string;
+            /** Number */
+            number: number;
+            region?: components["schemas"]["ImageRegion"] | null;
+        };
+        /** ImagePreviewOut */
+        ImagePreviewOut: {
+            source: components["schemas"]["ImageSourceOut"];
+            /** Width */
+            width: number;
+            /** Height */
+            height: number;
+            /** Crop Width */
+            crop_width: number;
+            /** Crop Height */
+            crop_height: number;
+            /**
+             * Planned Calls
+             * @default 1
+             * @constant
+             */
+            planned_calls: 1;
+        };
+        /** ImageRegion */
+        ImageRegion: {
+            /** X */
+            x: number;
+            /** Y */
+            y: number;
+            /** Width */
+            width: number;
+            /** Height */
+            height: number;
+        };
+        /** ImageSourceOut */
+        ImageSourceOut: {
+            /**
+             * Kind
+             * @constant
+             */
+            kind: "image";
+            /**
+             * Note Id
+             * Format: uuid
+             */
+            note_id: string;
+            /** Title */
+            title: string;
+            /** Revision */
+            revision: number;
+            /**
+             * Mode
+             * @enum {string}
+             */
+            mode: "page" | "region";
+            /** Pages */
+            pages: components["schemas"]["ImagePageRef"][];
+        };
         /** InviteIn */
         InviteIn: {
             /**
@@ -1784,6 +1965,12 @@ export interface components {
         /** PdfSourceOut */
         PdfSourceOut: {
             /**
+             * Kind
+             * @default pdf
+             * @constant
+             */
+            kind: "pdf";
+            /**
              * Note Id
              * Format: uuid
              */
@@ -1858,6 +2045,7 @@ export interface components {
             /** Prompt */
             prompt: string;
             pdf?: components["schemas"]["PdfInput"] | null;
+            image?: components["schemas"]["ImageInput"] | null;
         };
         /** RunOut */
         RunOut: {
@@ -1900,7 +2088,8 @@ export interface components {
             created_at: string;
             /** Finished At */
             finished_at: string | null;
-            source?: components["schemas"]["PdfSourceOut"] | null;
+            /** Source */
+            source?: components["schemas"]["PdfSourceOut"] | components["schemas"]["ImageSourceOut"] | null;
             progress?: components["schemas"]["PdfProgress"] | null;
             readonly formatted_answer: components["schemas"]["FormattedAnswer"] | null;
         };
@@ -1934,7 +2123,8 @@ export interface components {
              * Format: date-time
              */
             saved_at: string;
-            source: components["schemas"]["PdfSourceOut"] | null;
+            /** Source */
+            source: components["schemas"]["PdfSourceOut"] | components["schemas"]["ImageSourceOut"] | null;
             /** Cited Page Numbers */
             cited_page_numbers: number[];
         };
@@ -1961,7 +2151,8 @@ export interface components {
              * Format: date-time
              */
             saved_at: string;
-            source: components["schemas"]["PdfSourceOut"] | null;
+            /** Source */
+            source: components["schemas"]["PdfSourceOut"] | components["schemas"]["ImageSourceOut"] | null;
             /** Cited Page Numbers */
             cited_page_numbers: number[];
             /** Model */
@@ -1982,6 +2173,13 @@ export interface components {
             source_revision: number;
             /** Source Changed */
             source_changed: boolean;
+            /**
+             * Kind
+             * @default pdf
+             * @enum {string}
+             */
+            kind: "pdf" | "image";
+            region?: components["schemas"]["ImageRegion"] | null;
         };
         /** TagCreate */
         TagCreate: {
@@ -7791,6 +7989,315 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AiConnectionOut"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    image_notebooks_api_v1_ai_image_notebooks_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImageNotebookOut"][];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    image_notebook_api_v1_ai_image_notebooks__note_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                note_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImageNotebookDetail"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    image_preview_api_v1_ai_image_preview_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ImageInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImagePreviewOut"];
                 };
             };
             /** @description Bad Request */

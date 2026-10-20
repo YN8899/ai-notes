@@ -6996,6 +6996,365 @@
         }
       }
     },
+    "/api/v1/ai/image-notebooks": {
+      "get": {
+        "tags": [
+          "ai-chat"
+        ],
+        "summary": "Image Notebooks",
+        "operationId": "image_notebooks_api_v1_ai_image_notebooks_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ImageNotebookOut"
+                  },
+                  "type": "array",
+                  "title": "Response Image Notebooks Api V1 Ai Image Notebooks Get"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable Content",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/ai/image-notebooks/{note_id}": {
+      "get": {
+        "tags": [
+          "ai-chat"
+        ],
+        "summary": "Image Notebook",
+        "operationId": "image_notebook_api_v1_ai_image_notebooks__note_id__get",
+        "parameters": [
+          {
+            "name": "note_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Note Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImageNotebookDetail"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "description": "Unprocessable Content",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      }
+    },
+    "/api/v1/ai/image-preview": {
+      "post": {
+        "tags": [
+          "ai-chat"
+        ],
+        "summary": "Image Preview",
+        "operationId": "image_preview_api_v1_ai_image_preview_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImageInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImagePreviewOut"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable Content",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/ai/pdf-notebooks": {
       "get": {
         "tags": [
@@ -9351,6 +9710,305 @@
         ],
         "title": "HealthOut"
       },
+      "ImageInput": {
+        "properties": {
+          "note_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Note Id"
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Revision"
+          },
+          "page_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Page Id"
+          },
+          "region": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ImageRegion"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "note_id",
+          "revision",
+          "page_id"
+        ],
+        "title": "ImageInput"
+      },
+      "ImageNotebookDetail": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "revision": {
+            "type": "integer",
+            "title": "Revision"
+          },
+          "page_count": {
+            "type": "integer",
+            "title": "Page Count"
+          },
+          "pages": {
+            "items": {
+              "$ref": "#/components/schemas/ImageNotebookPage"
+            },
+            "type": "array",
+            "title": "Pages"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "title",
+          "revision",
+          "page_count",
+          "pages"
+        ],
+        "title": "ImageNotebookDetail"
+      },
+      "ImageNotebookOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "revision": {
+            "type": "integer",
+            "title": "Revision"
+          },
+          "page_count": {
+            "type": "integer",
+            "title": "Page Count"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "title",
+          "revision",
+          "page_count"
+        ],
+        "title": "ImageNotebookOut"
+      },
+      "ImageNotebookPage": {
+        "properties": {
+          "page_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Page Id"
+          },
+          "number": {
+            "type": "integer",
+            "title": "Number"
+          },
+          "region": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ImageRegion"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "file_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "File Id"
+          },
+          "page_revision": {
+            "type": "integer",
+            "title": "Page Revision"
+          },
+          "bytes": {
+            "type": "integer",
+            "title": "Bytes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "page_id",
+          "number",
+          "file_id",
+          "page_revision",
+          "bytes"
+        ],
+        "title": "ImageNotebookPage"
+      },
+      "ImagePageRef": {
+        "properties": {
+          "page_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Page Id"
+          },
+          "number": {
+            "type": "integer",
+            "title": "Number"
+          },
+          "region": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ImageRegion"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "page_id",
+          "number"
+        ],
+        "title": "ImagePageRef"
+      },
+      "ImagePreviewOut": {
+        "properties": {
+          "source": {
+            "$ref": "#/components/schemas/ImageSourceOut"
+          },
+          "width": {
+            "type": "integer",
+            "title": "Width"
+          },
+          "height": {
+            "type": "integer",
+            "title": "Height"
+          },
+          "crop_width": {
+            "type": "integer",
+            "title": "Crop Width"
+          },
+          "crop_height": {
+            "type": "integer",
+            "title": "Crop Height"
+          },
+          "planned_calls": {
+            "type": "integer",
+            "const": 1,
+            "title": "Planned Calls",
+            "default": 1
+          }
+        },
+        "type": "object",
+        "required": [
+          "source",
+          "width",
+          "height",
+          "crop_width",
+          "crop_height"
+        ],
+        "title": "ImagePreviewOut"
+      },
+      "ImageRegion": {
+        "properties": {
+          "x": {
+            "type": "number",
+            "exclusiveMaximum": 1.0,
+            "minimum": 0.0,
+            "title": "X"
+          },
+          "y": {
+            "type": "number",
+            "exclusiveMaximum": 1.0,
+            "minimum": 0.0,
+            "title": "Y"
+          },
+          "width": {
+            "type": "number",
+            "maximum": 1.0,
+            "exclusiveMinimum": 0.0,
+            "title": "Width"
+          },
+          "height": {
+            "type": "number",
+            "maximum": 1.0,
+            "exclusiveMinimum": 0.0,
+            "title": "Height"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "x",
+          "y",
+          "width",
+          "height"
+        ],
+        "title": "ImageRegion"
+      },
+      "ImageSourceOut": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "const": "image",
+            "title": "Kind"
+          },
+          "note_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Note Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "revision": {
+            "type": "integer",
+            "title": "Revision"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "page",
+              "region"
+            ],
+            "title": "Mode"
+          },
+          "pages": {
+            "items": {
+              "$ref": "#/components/schemas/ImagePageRef"
+            },
+            "type": "array",
+            "title": "Pages"
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "note_id",
+          "title",
+          "revision",
+          "mode",
+          "pages"
+        ],
+        "title": "ImageSourceOut"
+      },
       "InviteIn": {
         "properties": {
           "label": {
@@ -10480,6 +11138,12 @@
       },
       "PdfSourceOut": {
         "properties": {
+          "kind": {
+            "type": "string",
+            "const": "pdf",
+            "title": "Kind",
+            "default": "pdf"
+          },
           "note_id": {
             "type": "string",
             "format": "uuid",
@@ -10681,6 +11345,16 @@
                 "type": "null"
               }
             ]
+          },
+          "image": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ImageInput"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "additionalProperties": false,
@@ -10781,9 +11455,13 @@
                 "$ref": "#/components/schemas/PdfSourceOut"
               },
               {
+                "$ref": "#/components/schemas/ImageSourceOut"
+              },
+              {
                 "type": "null"
               }
-            ]
+            ],
+            "title": "Source"
           },
           "progress": {
             "anyOf": [
@@ -10903,9 +11581,13 @@
                 "$ref": "#/components/schemas/PdfSourceOut"
               },
               {
+                "$ref": "#/components/schemas/ImageSourceOut"
+              },
+              {
                 "type": "null"
               }
-            ]
+            ],
+            "title": "Source"
           },
           "cited_page_numbers": {
             "items": {
@@ -10979,9 +11661,13 @@
                 "$ref": "#/components/schemas/PdfSourceOut"
               },
               {
+                "$ref": "#/components/schemas/ImageSourceOut"
+              },
+              {
                 "type": "null"
               }
-            ]
+            ],
+            "title": "Source"
           },
           "cited_page_numbers": {
             "items": {
@@ -11031,6 +11717,25 @@
           "source_changed": {
             "type": "boolean",
             "title": "Source Changed"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "pdf",
+              "image"
+            ],
+            "title": "Kind",
+            "default": "pdf"
+          },
+          "region": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ImageRegion"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",

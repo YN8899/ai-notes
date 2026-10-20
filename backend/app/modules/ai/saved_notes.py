@@ -7,6 +7,7 @@ from sqlalchemy import select
 from app.modules.ai import chat_service, schemas as s
 from app.modules.ai.models import AiRun, AiSavedNote
 from app.modules.ai.answer_format import answer_document, plain_text
+from app.modules.ai import source_context
 from app.modules.notes import service as notes, schemas as ns
 from app.modules.notes.models import Note
 from app.shared.errors import AppError
@@ -44,13 +45,15 @@ def note_provenance(db, user, note_id):
 
 def note_content(run, source):
     allowed = {page.number for page in source.pages} if source else set()
+    image_source = bool(source and source.kind == "image")
+    source_label = "图片第 " if image_source else "原 PDF 第 "
     cited = set()
 
     def readable(match):
         number = int(match[1])
         if number in allowed:
             cited.add(number)
-            return f"（原 PDF 第 {number} 页）"
+            return f"（{source_label}{number} 页）"
         return match[0]
 
     def literal(text):
@@ -76,10 +79,12 @@ def note_content(run, source):
     sections = [("问题", literal(run.prompt)), ("AI 回答", answer["content"]), ("生成模型", literal(run.model))]
     if source:
         numbers = "、".join(str(page.number) for page in source.pages)
-        reference = f"{source.title}\n原 PDF 第 {numbers} 页\n来源版本 {source.revision}"
+        reference = f"{source.title}\n{source_label}{numbers} 页\n来源版本 {source.revision}"
+        if image_source:
+            reference += "\n" + source_context.region_text(source.pages[0].region.model_dump() if source.pages[0].region else None)
         if cited:
-            reference += "\n回答引用原 PDF 第 " + "、".join(map(str, cited)) + " 页"
-        sections.append(("PDF 来源", literal(reference)))
+            reference += "\n回答引用" + source_label + "、".join(map(str, cited)) + " 页"
+        sections.append(("图片来源" if image_source else "PDF 来源", literal(reference)))
     content = []
     for title, nodes in sections:
         content.append({"type": "heading", "attrs": {"level": 2}, "content": [{"type": "text", "text": title}]})
@@ -97,7 +102,7 @@ def save_answer(db, user, run_id, data):
         return metadata(existing, db.get(Note, existing.note_id))
     if run.status != "succeeded" or not run.answer.strip():
         raise AppError(409, "answer_not_complete", "请等待完整回答生成后再保存为笔记")
-    source = s.PdfSourceOut.model_validate(run.source) if run.source else None
+    source = source_context.public_source(run.source)
     body, plain, cited = note_content(run, source)
     try:
         create = ns.NoteCreate(title=data.title, notebook_id=data.notebook_id, body_json=body, plain_text=plain)
