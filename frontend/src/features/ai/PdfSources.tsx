@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ReactNode } from 'react'
+import { lazy, Suspense, useEffect, useRef } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '../../api'
 import type { components } from '../../api.generated'
@@ -6,6 +6,8 @@ import { ImageReader } from '../files/ImageReader'
 import type { Run } from './chat-stream'
 import { pageRange } from './pdf-pages'
 import '../files/files.css'
+
+const FormattedAnswer=lazy(()=>import('./FormattedAnswer').then(module=>({default:module.FormattedAnswer})))
 
 export type PdfInput=components['schemas']['PdfInput']
 export type PdfPreview=components['schemas']['PdfPreviewOut']
@@ -30,17 +32,14 @@ export function PdfPicker({choice,onChange,books,book,preview,error,loading,disa
 }
 
 export function CitedAnswer({run,onOpen}:{run:Run;onOpen:(run:Run,page:Ref)=>void}) {
-  const pieces:ReactNode[]=[]
-  let offset=0
-  for(const match of run.answer.matchAll(/\[\[p:(\d+)\]\]/g)) {
-    const position=match.index!
-    pieces.push(run.answer.slice(offset,position))
-    const page=run.source?.pages.find(page=>page.number===Number(match[1]))
-    pieces.push(page?<button type="button" className="citation-link" key={position} aria-label={'查看来源原 PDF 第'+page.number+'页'} onClick={()=>onOpen(run,page)}>第 {page.number} 页</button>:match[0])
-    offset=position+match[0].length
+  const formatted=run.formatted_answer
+  const citation=(number:number,key:string)=>{
+    const page=run.source?.pages.find(page=>page.number===number)
+    return page?<button type="button" className="citation-link" key={key} aria-label={'查看来源原 PDF 第'+page.number+'页'} onClick={()=>onOpen(run,page)}>第 {page.number} 页</button>:null
   }
-  pieces.push(run.answer.slice(offset))
-  return <>{pieces}</>
+  const complete=run.status!=='queued'&&run.status!=='running'
+  if(complete&&formatted?.body_json&&!formatted.fallback)return <Suspense fallback={<>{run.answer}</>}><FormattedAnswer body={formatted.body_json} citation={citation}/></Suspense>
+  return <>{formatted?.fallback?<p className="muted" role="status">内容较复杂，已显示原文。</p>:null}{run.answer}</>
 }
 
 export function PdfRunScope({run,onOpen}:{run:Run;onOpen:(run:Run,page:Ref)=>void}) {

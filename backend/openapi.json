@@ -9312,6 +9312,32 @@
         ],
         "title": "FolderPatch"
       },
+      "FormattedAnswer": {
+        "properties": {
+          "body_json": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Body Json"
+          },
+          "fallback": {
+            "type": "boolean",
+            "title": "Fallback"
+          }
+        },
+        "type": "object",
+        "required": [
+          "body_json",
+          "fallback"
+        ],
+        "title": "FormattedAnswer"
+      },
       "HealthOut": {
         "properties": {
           "status": {
@@ -10768,6 +10794,17 @@
                 "type": "null"
               }
             ]
+          },
+          "formatted_answer": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FormattedAnswer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "readOnly": true
           }
         },
         "type": "object",
@@ -10782,7 +10819,8 @@
           "usage",
           "error_code",
           "created_at",
-          "finished_at"
+          "finished_at",
+          "formatted_answer"
         ],
         "title": "RunOut"
       },

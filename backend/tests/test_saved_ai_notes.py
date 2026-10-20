@@ -229,7 +229,7 @@ def test_snapshot_failure_rolls_back_note_version_and_saved_relation(client, mon
 
 def test_answer_exceeding_note_structure_limit_is_rejected_without_partial_rows(client):
     login(client)
-    _, row = completed(client, answer="a\n" * 10_000 + "end")
+    _, row = completed(client, answer="a\n\n" * 10_000 + "end")
     response = save(client, row)
     assert response.status_code == 422, response.text
     assert response.json()["code"] == "answer_note_too_large"
@@ -299,20 +299,66 @@ def test_pdf_snapshot_citations_are_safe_and_source_deletion_preserves_answer_wi
         assert "object_key" not in json.dumps(relation.source) and "file_id" not in json.dumps(relation.source)
 
 
-def test_hostile_model_markup_is_preserved_as_literal_text_without_executable_nodes(client):
+def test_hostile_model_markup_is_safe_while_supported_markdown_keeps_format(client):
     login(client)
     question = '<img src=x onerror="alert(1)"> 怎么理解？'
     answer = '<script>alert(document.cookie)</script>\n[点击](javascript:alert(2))\n**粗体**\n```html\n<iframe src="https://evil.example"></iframe>\n```'
     _, row = completed(client, prompt=question, answer=answer)
     saved = save(client, row).json()
     detail = client.get(f"/api/v1/notes/{saved['note_id']}").json()
-    assert question in detail["plain_text"] and answer in detail["plain_text"]
+    assert question in detail["plain_text"] and "粗体" in detail["plain_text"]
     flattened = document_text(detail["body_json"])
     assert question in flattened and "<script>alert(document.cookie)</script>" in flattened
     stack = [detail["body_json"]]
     while stack:
         node = stack.pop()
-        assert node["type"] in {"doc", "heading", "paragraph", "text", "hardBreak"}
-        assert not node.get("marks")
-        assert not node.get("attrs") or node["type"] == "heading" and node["attrs"] == {"level": 2}
+        assert node["type"] in {"doc", "heading", "paragraph", "text", "hardBreak", "codeBlock"}
+        assert all(mark["type"] == "bold" for mark in node.get("marks", []))
+        assert set(node.get("attrs", {})) <= {"level", "language"}
         stack.extend(node.get("content", []))
+
+
+def test_markdown_math_and_pdf_citations_share_chat_and_editable_saved_content(client):
+    login(client)
+    nid = pdf_book(client)
+    selected = source(client, nid, "pages", [1, 3])
+    answer = ("# 能量推导\n\n**结论**：$E=mc^2$，来源[[p:1]]。\n\n"
+              "3. 第一项\n4. 第二项\n\n> 核对依据\n\n"
+              "```python\nprint('[[p:3]]')\n```\n\n"
+              "`[[p:3]]` 与 [链接中的[[p:3]]](https://example.com/ref)\n\n"
+              "$$\n\\text{[[p:3]]}\n$$")
+    answer += "\n\n$" + "x" * 8193 + "[[p:3]]$"
+    _, row = completed(client, answer=answer, pdf=selected)
+    assert row["formatted_answer"] is None  # The initial queued response is plain.
+    fetched = client.get(f"/api/v1/ai/runs/{row['id']}").json()
+    assert fetched["answer"] == answer and fetched["formatted_answer"]["fallback"] is False
+    chat_body = fetched["formatted_answer"]["body_json"]
+    saved = save(client, row).json()
+    assert saved["cited_page_numbers"] == [1]
+    detail = client.get(f"/api/v1/notes/{saved['note_id']}").json()
+    nodes, stack = [], [detail["body_json"]]
+    while stack:
+        node = stack.pop()
+        nodes.append(node)
+        stack.extend(node.get("content", []))
+    assert any(n["type"] == "heading" and n.get("attrs", {}).get("level") == 1 for n in nodes)
+    assert any(n["type"] == "orderedList" and n["attrs"]["start"] == 3 for n in nodes)
+    assert any(n["type"] == "inlineMath" and n["attrs"]["latex"] == "E=mc^2" for n in nodes)
+    assert any(n["type"] == "blockMath" and "[[p:3]]" in n["attrs"]["latex"] for n in nodes)
+    assert any(n["type"] == "codeBlock" and n["attrs"]["language"] == "python" for n in nodes)
+    assert any(n.get("text", "").endswith("[[p:3]]$") and n.get("marks") == [{"type": "code"}] for n in nodes)
+    assert "原 PDF 第 1 页" in detail["plain_text"] and "[[p:3]]" in detail["plain_text"]
+    assert "[[p:1]]" in document_text(chat_body) and "[[p:1]]" not in document_text(detail["body_json"])
+    stream = client.get(f"/api/v1/ai/runs/{row['id']}/events").text
+    done = next(block for block in stream.split("\n\n") if block.startswith("event: done"))
+    assert json.loads(done.split("data: ", 1)[1])["formatted_answer"] == fetched["formatted_answer"]
+
+
+def test_complex_answer_falls_back_without_losing_original_text_or_interpreting_citations(client):
+    login(client)
+    answer = "a\n\n" * 10_000 + "[[p:1]]"
+    _, row = completed(client, answer=answer)
+    result = client.get(f"/api/v1/ai/runs/{row['id']}").json()
+    assert result["answer"] == answer
+    assert result["formatted_answer"] == {"body_json": None, "fallback": True}
+    assert counts() == (0, 0, 0)

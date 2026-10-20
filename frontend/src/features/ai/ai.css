@@ -15,6 +15,36 @@
 .chat-answer{padding:0 4px;line-height:1.8}
 .chat-answer small,.chat-question small{color:#68766b}
 .chat-answer-text{white-space:pre-wrap;overflow-wrap:anywhere;margin:12px 0}
+.chat-formatted-answer{white-space:normal;min-width:0;max-width:100%;overflow-wrap:anywhere}
+.chat-formatted-answer>:first-child{margin-top:0}
+.chat-formatted-answer>:last-child{margin-bottom:0}
+.chat-formatted-answer p{margin:0 0 12px}
+.chat-formatted-answer h1,.chat-formatted-answer h2{font-size:23px;line-height:1.45;margin:24px 0 12px}
+.chat-formatted-answer h3{font-size:19px;margin:20px 0 10px}
+.chat-formatted-answer h4,.chat-formatted-answer h5,.chat-formatted-answer h6{font-size:16px;margin:18px 0 10px}
+.chat-formatted-answer ul,.chat-formatted-answer ol{padding-left:26px;margin:12px 0}
+.chat-formatted-answer li>p{margin:5px 0}
+.chat-formatted-answer blockquote{border-left:3px solid #8eaf97;margin:16px 0;padding:4px 0 4px 16px;color:#586c5d}
+.chat-formatted-answer a{color:#285f4b;text-decoration:underline;text-underline-offset:3px}
+.chat-formatted-answer code{font-family:Consolas,monospace;font-size:.9em;background:#f1f5ef;border-radius:4px;padding:2px 5px;white-space:pre-wrap;overflow-wrap:anywhere}
+.answer-code{min-width:0;max-width:100%;margin:14px 0;background:#f2f5f1;border:1px solid #e0e7dc;border-radius:8px;overflow:hidden}
+.answer-code>small{display:block;padding:6px 14px;border-bottom:1px solid #e0e7dc;font-family:Consolas,monospace;overflow-wrap:anywhere}
+.answer-code pre{white-space:pre;overflow-wrap:normal;max-width:100%;overflow:auto;margin:0;padding:14px;line-height:1.7;max-height:480px}
+.answer-code pre code{white-space:pre;overflow-wrap:normal;background:none;padding:0;border-radius:0}
+.chat-formatted-answer hr{border:0;border-top:1px solid #dce5d8;margin:22px 0}
+.answer-math{box-sizing:border-box;max-width:100%;overflow-x:auto;overflow-y:hidden;padding:3px 0}
+.answer-math-inline{display:inline-block;vertical-align:middle}
+.answer-math-block{display:block;margin:14px 0}
+.answer-math-block .katex-display{margin:0}
+.answer-math-error{max-width:100%;overflow-wrap:anywhere;white-space:pre-wrap;color:#925427;background:#fff7e8;border-radius:5px;padding:4px 6px}
+.answer-math-error-label{font-size:12px}
+.answer-math-error code{background:none;font:inherit;padding:0}
+.rich-editor,.note-prose{min-width:0;max-width:100%}
+.note-prose pre{white-space:pre;overflow-wrap:normal;max-width:100%;overflow-x:auto}
+.note-prose .tiptap-mathematics-render[data-type=inline-math]{display:inline-block;vertical-align:middle;box-sizing:border-box;max-width:100%;overflow-x:auto;padding:3px 0}
+.note-prose .tiptap-mathematics-render[data-type=block-math]{box-sizing:border-box;max-width:100%;overflow-x:auto;margin:14px 0;padding:3px 0}
+.note-prose .block-math-error,.note-prose .inline-math-error{color:#925427;background:#fff7e8;white-space:pre-wrap;overflow-wrap:anywhere}
+.note-prose .block-math-error::before,.note-prose .inline-math-error::before{content:'公式未能排版，原 LaTeX：';font-size:12px}
 .chat-warning{color:#925427;background:#fff7e8;padding:10px 14px;border-radius:8px}
 .chat-composer{margin-top:28px;border-top:1px solid #e3e8de;padding-top:22px}
 .chat-composer textarea{width:100%;resize:vertical;min-height:100px}

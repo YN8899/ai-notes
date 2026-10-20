@@ -62,4 +62,4 @@ PDF 使用支持图片的 DeepSeek Flash。选择 PDF 后，模型列表不提�
 
 SSE 的 state 事件新增 progress，meta/done 继续携带经过过滤的来源与完整状态。写请求仍验证 CSRF 和 Origin。
 
-依据：[DeepSeek 官方视觉接口](https://api-docs.deepseek.com/guides/vision/)。PDF 对话验收见 [本机记录](task-evidence/2026-10-16-pdf-ai.md)。2026-10-20 回答保存功能已在本地实现，本机迁移、回归与网页实测通过，结果见 [保存阶段记录](task-evidence/2026-10-20-save-ai-answer.md)。原 PDF 删除后，已完成回答仍可保存为文字并保留来源快照，但打开原页仍会提示不可用；本阶段按普通文字保存，不自动转换 Markdown 或公式。后续继续普通图片笔记与矩形选区、富文本来源引用、Markdown/公式显示和云端验收，完整 M1 尚未完成。
+依据：[DeepSeek 官方视觉接口](https://api-docs.deepseek.com/guides/vision/)。PDF 对话验收见 [本机记录](task-evidence/2026-10-16-pdf-ai.md)。2026-10-20 回答保存功能已在本地实现，本机迁移、回归与网页实测通过，结果见 [保存阶段记录](task-evidence/2026-10-20-save-ai-answer.md)。原 PDF 删除后，已完成回答仍可保存为文字并保留来源快照，但打开原页仍会提示不可用；随后已接入 Markdown 与公式排版，新保存笔记保留格式，代码/公式中的页码标记保持字面内容。后续继续普通图片笔记与矩形选区、富文本来源引用和云端验收，完整 M1 尚未完成。

@@ -27,3 +27,38 @@ test('unexpected EOF is explicit and does not silently retry or lose delivered t
     assert.equal(calls,1);assert.equal(received[0].text,'已保存')
   }finally{globalThis.fetch=original}
 })
+
+test('multiple valid events can share a network chunk larger than the single-event limit',async()=>{
+  const original=globalThis.fetch, answer='a'.repeat(600_000)
+  const meta=`event: meta\ndata: ${JSON.stringify({answer})}\n\n`
+  const done=`event: done\ndata: ${JSON.stringify({answer,status:'succeeded'})}\n\n`
+  assert.ok(meta.length<1_000_000&&done.length<1_000_000&&meta.length+done.length>1_000_000)
+  const bytes=new TextEncoder().encode(meta+done)
+  globalThis.fetch=async()=>new Response(new ReadableStream({start(controller){controller.enqueue(bytes);controller.close()}}))
+  try{
+    const received=[]
+    await readStream('run',new AbortController().signal,(name,data)=>received.push({name,data}))
+    assert.deepEqual(received,[{name:'meta',data:{answer}},{name:'done',data:{answer,status:'succeeded'}}])
+  }finally{globalThis.fetch=original}
+})
+
+test('a complete event larger than the single-event limit is rejected without delivering it',async()=>{
+  const original=globalThis.fetch, received=[];let calls=0
+  const block=`event: done\ndata: ${JSON.stringify({answer:'a'.repeat(1_000_000)})}\n\n`
+  globalThis.fetch=async()=>{calls++;return new Response(block)}
+  try{
+    await assert.rejects(()=>readStream('run',new AbortController().signal,(name,data)=>received.push(data)),/回复格式异常/)
+    assert.equal(calls,1);assert.deepEqual(received,[])
+  }finally{globalThis.fetch=original}
+})
+
+test('an unfinished event larger than the limit is rejected after delivering preceding valid events',async()=>{
+  const original=globalThis.fetch, received=[];let calls=0
+  const prefix='event: delta\ndata: {"offset":0,"text":"已保存"}\n\n'
+  const unfinished='event: done\ndata: '+ 'a'.repeat(1_000_001)
+  globalThis.fetch=async()=>{calls++;return new Response(prefix+unfinished)}
+  try{
+    await assert.rejects(()=>readStream('run',new AbortController().signal,(name,data)=>received.push({name,data})),/回复格式异常/)
+    assert.equal(calls,1);assert.deepEqual(received,[{name:'delta',data:{offset:0,text:'已保存'}}])
+  }finally{globalThis.fetch=original}
+})

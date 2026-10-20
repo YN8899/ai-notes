@@ -20,9 +20,9 @@ export async function readStream(id:string, signal:AbortSignal, receive:(name:st
     while (true) {
       const chunk = await reader.read()
       buffer = (buffer+decoder.decode(chunk.value,{stream:!chunk.done})).replace(/\r\n/g,'\n')
-      if(buffer.length>1_000_000)throw new Error('回复格式异常，请重新读取已保存的结果')
       let boundary:number
       while ((boundary=buffer.indexOf('\n\n')) !== -1) {
+        if(boundary>1_000_000)throw new Error('回复格式异常，请重新读取已保存的结果')
         const block=buffer.slice(0,boundary)
         buffer=buffer.slice(boundary+2)
         const lines=block.split('\n')
@@ -35,6 +35,7 @@ export async function readStream(id:string, signal:AbortSignal, receive:(name:st
           if (name==='done') done=true
         }
       }
+      if(buffer.length>1_000_000)throw new Error('回复格式异常，请重新读取已保存的结果')
       if (chunk.done) break
     }
     if (!done) throw new Error('连接已断开，已保存的内容仍在。点击“重新读取”查看原回复。')

@@ -1,10 +1,12 @@
 """Create an editable note from a server-owned answer, without another model call."""
 import re
+from copy import deepcopy
 
 from sqlalchemy import select
 
 from app.modules.ai import chat_service, schemas as s
 from app.modules.ai.models import AiRun, AiSavedNote
+from app.modules.ai.answer_format import answer_document, plain_text
 from app.modules.notes import service as notes, schemas as ns
 from app.modules.notes.models import Note
 from app.shared.errors import AppError
@@ -42,31 +44,48 @@ def note_provenance(db, user, note_id):
 
 def note_content(run, source):
     allowed = {page.number for page in source.pages} if source else set()
-    cited = sorted({int(match[1]) for match in CITATION.finditer(run.answer) if int(match[1]) in allowed})
+    cited = set()
 
     def readable(match):
         number = int(match[1])
-        return f"（原 PDF 第 {number} 页）" if number in allowed else match[0]
+        if number in allowed:
+            cited.add(number)
+            return f"（原 PDF 第 {number} 页）"
+        return match[0]
 
-    answer = CITATION.sub(readable, run.answer)
-    # Build literal Tiptap nodes, never parse provider output as HTML or Markdown.
-    sections = [("问题", run.prompt), ("AI 回答", answer), ("生成模型", run.model)]
+    def literal(text):
+        return [{"type": "paragraph", **({"content": [{"type": "text", "text": line}]} if line else {})}
+                for line in text.split("\n")]
+
+    answer = answer_document(run.answer)
+    if answer is not None:
+        answer = deepcopy(answer)
+        stack = [(answer, False)]
+        while stack:
+            node, protected = stack.pop()
+            protected = protected or node["type"] in {"codeBlock", "inlineMath", "blockMath"} or any(
+                mark["type"] in {"code", "link"} for mark in node.get("marks", []))
+            if node["type"] == "text" and not protected:
+                node["text"] = CITATION.sub(readable, node["text"])
+            stack.extend((child, protected) for child in node.get("content", []))
+    else:
+        # Complex content stays complete and literal. Never guess citations
+        # inside an unparsed code block or formula.
+        answer = {"type": "doc", "content": literal(run.answer)}
+    cited = sorted(cited)
+    sections = [("问题", literal(run.prompt)), ("AI 回答", answer["content"]), ("生成模型", literal(run.model))]
     if source:
         numbers = "、".join(str(page.number) for page in source.pages)
         reference = f"{source.title}\n原 PDF 第 {numbers} 页\n来源版本 {source.revision}"
         if cited:
             reference += "\n回答引用原 PDF 第 " + "、".join(map(str, cited)) + " 页"
-        sections.append(("PDF 来源", reference))
-    content, plain = [], []
-    for title, text in sections:
+        sections.append(("PDF 来源", literal(reference)))
+    content = []
+    for title, nodes in sections:
         content.append({"type": "heading", "attrs": {"level": 2}, "content": [{"type": "text", "text": title}]})
-        for line in text.split("\n"):
-            paragraph = {"type": "paragraph"}
-            if line:
-                paragraph["content"] = [{"type": "text", "text": line}]
-            content.append(paragraph)
-        plain.extend([title, text])
-    return {"type": "doc", "content": content}, "\n\n".join(plain), cited
+        content.extend(nodes)
+    body = {"type": "doc", "content": content}
+    return body, plain_text(body), cited
 
 
 def save_answer(db, user, run_id, data):

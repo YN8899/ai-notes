@@ -1306,6 +1306,15 @@ export interface components {
             /** Parent Id */
             parent_id?: string | null;
         };
+        /** FormattedAnswer */
+        FormattedAnswer: {
+            /** Body Json */
+            body_json: {
+                [key: string]: unknown;
+            } | null;
+            /** Fallback */
+            fallback: boolean;
+        };
         /** HealthOut */
         HealthOut: {
             /** Status */
@@ -1893,6 +1902,7 @@ export interface components {
             finished_at: string | null;
             source?: components["schemas"]["PdfSourceOut"] | null;
             progress?: components["schemas"]["PdfProgress"] | null;
+            readonly formatted_answer: components["schemas"]["FormattedAnswer"] | null;
         };
         /** SaveAnswerIn */
         SaveAnswerIn: {
