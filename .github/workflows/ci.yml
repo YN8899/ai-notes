@@ -40,6 +40,8 @@ jobs:
         working-directory: backend
       - run: alembic upgrade head && alembic check && pytest -q
         working-directory: backend
+        env:
+          SITE_BACKUP_TEST_CONTAINER: ${{ job.services.postgres.id }}
       - run: PYTHONPATH=. python scripts/export_openapi.py
         working-directory: backend
       - run: npm ci && npm run check:types && npm run build
