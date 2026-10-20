@@ -4,6 +4,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, computed_field, field_validator, model_validator
 from app.modules.ai.answer_format import answer_document
+from app.modules.ai.image_schemas import ImageInput, ImageRegion, ImageSourceOut
 from app.modules.notes.schemas import Input, Title
 
 
@@ -69,6 +70,7 @@ class PdfPageRef(BaseModel):
 
 class PdfSourceOut(BaseModel):
     # Intentionally excludes internal object keys, file IDs and storage metadata.
+    kind: Literal["pdf"] = "pdf"
     note_id: UUID
     revision: int
     title: str
@@ -115,6 +117,8 @@ class SourcePageOut(BaseModel):
     page_number: int
     source_revision: int
     source_changed: bool
+    kind: Literal["pdf", "image"] = "pdf"
+    region: ImageRegion | None = None
 
 
 class RunCreate(BaseModel):
@@ -124,6 +128,13 @@ class RunCreate(BaseModel):
     model: Literal["deepseek-flash", "deepseek-v4-pro"] = "deepseek-flash"
     prompt: str = Field(min_length=1, max_length=8000)
     pdf: PdfInput | None = None
+    image: ImageInput | None = None
+
+    @model_validator(mode="after")
+    def one_visual_source(self):
+        if self.pdf is not None and self.image is not None:
+            raise ValueError("Choose either PDF or image input")
+        return self
 
     @field_validator("prompt")
     @classmethod
@@ -152,7 +163,7 @@ class RunOut(BaseModel):
     error_code: str | None
     created_at: datetime
     finished_at: datetime | None
-    source: PdfSourceOut | None = None
+    source: PdfSourceOut | ImageSourceOut | None = None
     progress: PdfProgress | None = None
 
     @computed_field
@@ -182,7 +193,7 @@ class SavedAnswerOut(BaseModel):
     notebook_id: UUID | None
     deleted_at: datetime | None
     saved_at: datetime
-    source: PdfSourceOut | None
+    source: PdfSourceOut | ImageSourceOut | None
     cited_page_numbers: list[int]
 
 

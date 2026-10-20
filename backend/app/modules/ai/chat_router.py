@@ -4,18 +4,40 @@ from uuid import UUID
 
 from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
-from sqlalchemy import select
+from sqlalchemy import func, select
 from starlette.concurrency import run_in_threadpool
 
-from app.modules.ai import chat_service as service, pdf_context, schemas as s
+from app.modules.ai import chat_service as service, image_context, image_schemas as image_s, pdf_context, source_context, schemas as s
 from app.modules.ai.models import AiConversation, AiRun
-from app.modules.files.models import PdfImport
+from app.modules.files.models import File, FileVariant, NotePage, PdfImport
 from app.modules.notes.models import Note
 from app.shared.db import utcnow
 from app.shared.dependencies import CurrentUser, DB
 from app.shared.errors import AppError
 
 router = APIRouter(tags=["ai-chat"])
+
+
+@router.get("/ai/image-notebooks", response_model=list[image_s.ImageNotebookOut])
+def image_notebooks(db: DB, user: CurrentUser):
+    rows = db.execute(select(Note.id, Note.title, Note.revision, func.count(NotePage.id).label("page_count"))
+                      .join(NotePage, NotePage.note_id == Note.id).join(File, File.id == NotePage.file_id)
+                      .join(FileVariant, FileVariant.file_id == File.id).where(
+                          Note.owner_id == user.id, Note.kind == "image", Note.deleted_at.is_(None),
+                          NotePage.owner_id == user.id, NotePage.pdf_page_number.is_(None),
+                          File.owner_id == user.id, File.status == "ready", FileVariant.kind == "reading")
+                      .group_by(Note.id).order_by(Note.updated_at.desc()).limit(100))
+    return [image_s.ImageNotebookOut(**dict(row._mapping)) for row in rows]
+
+
+@router.get("/ai/image-notebooks/{note_id}", response_model=image_s.ImageNotebookDetail)
+def image_notebook(note_id: UUID, db: DB, user: CurrentUser):
+    return image_context.detail(db, user.id, note_id)
+
+
+@router.post("/ai/image-preview", response_model=image_s.ImagePreviewOut)
+def image_preview(data: image_s.ImageInput, db: DB, user: CurrentUser):
+    return image_context.preview(db, user.id, data)
 
 
 @router.get("/ai/pdf-notebooks", response_model=list[s.PdfNotebookOut])
@@ -43,9 +65,10 @@ def source_page(run_id: UUID, page_id: UUID, db: DB, user: CurrentUser):
     page = next((page for page in source["pages"] if page["page_id"] == str(page_id)), None) if source else None
     if not page:
         raise AppError(404, "source_not_found", "这次回答没有引用此页")
-    note = pdf_context.validate(db, user.id, source)
+    note = source_context.validate(db, user.id, source)
     return s.SourcePageOut(file_id=page["file_id"], title=source["title"], page_number=page["number"],
-                           source_revision=source["revision"], source_changed=note.revision != source["revision"])
+                           source_revision=source["revision"], source_changed=note.revision != source["revision"],
+                           kind="image" if source_context.is_image(source) else "pdf", region=page.get("region"))
 
 
 @router.get("/ai/conversations", response_model=list[s.ConversationOut])

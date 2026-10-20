@@ -39,7 +39,10 @@ def runs(db, owner, conversation_id):
 
 def create_run(db, owner, conversation_id, data):
     parent = conversation(db, owner, conversation_id)
-    request_hash = hashlib.sha256(json.dumps({"conversation": str(conversation_id), **data.model_dump(mode="json")},
+    payload = data.model_dump(mode="json")
+    if data.image is None:
+        payload.pop("image")  # Preserve pre-image request hashes for existing text/PDF retries.
+    request_hash = hashlib.sha256(json.dumps({"conversation": str(conversation_id), **payload},
                                            sort_keys=True, ensure_ascii=False).encode()).hexdigest()
     previous = db.scalar(select(AiRun).where(AiRun.owner_id == owner, AiRun.request_key == data.request_key))
     if previous:
@@ -59,22 +62,26 @@ def create_run(db, owner, conversation_id, data):
     recent = db.scalar(select(func.count()).select_from(AiRun).where(AiRun.owner_id == owner, AiRun.created_at > utcnow() - timedelta(hours=1)))
     if recent >= 30:
         raise AppError(429, "ai_rate_limited", "每小时最多发送 30 次，请稍后再试")
-    from app.modules.ai import pdf_context
-    source = pdf_context.freeze(db, owner, data.pdf) if data.pdf else None
+    from app.modules.ai import image_context, pdf_context, source_context
+    source = image_context.freeze(db, owner, data.image) if data.image else pdf_context.freeze(db, owner, data.pdf) if data.pdf else None
     if source and data.model != "deepseek-flash":
-        raise AppError(422, "vision_model_required", "PDF 页图提问需要支持图片的 DeepSeek Flash")
+        raise AppError(422, "vision_model_required", "图片和 PDF 页图提问需要支持图片的 DeepSeek Flash")
     for item in history:
         if item.status == "succeeded" and item.source:
-            pdf_context.validate(db, owner, item.source)
-            if source and source["note_id"] != item.source["note_id"]:
-                raise AppError(422, "pdf_conversation_scope", "一段对话仅引用同一本 PDF，更换 PDF 请新建对话")
+            source_context.validate(db, owner, item.source)
+            if source and (source["note_id"] != item.source["note_id"] or source_context.is_image(source) != source_context.is_image(item.source)):
+                raise AppError(422, "pdf_conversation_scope", "一段对话仅引用同一本同类型来源，更换资料请新建对话")
     messages = [{"role": "system", "content": SYSTEM}]
     for item in history:
         # Failed/cancelled turns are visible in history but excluded from future model context.
         if item.status == "succeeded":
             scope = ""
             if item.source:
-                scope = "\n[当时附加原 PDF 页码：" + ",".join(str(p["number"]) for p in item.source["pages"]) + "]"
+                label = "图片页码" if source_context.is_image(item.source) else "原 PDF 页码"
+                scope = "\n[当时附加" + label + "：" + ",".join(str(p["number"]) for p in item.source["pages"])
+                if source_context.is_image(item.source):
+                    scope += "；" + source_context.region_text(item.source["pages"][0].get("region"))
+                scope += "]"
             messages.extend([{"role": "user", "content": item.prompt + scope}, {"role": "assistant", "content": item.answer}])
     messages.append({"role": "user", "content": data.prompt})
     if sum(len(m["content"].encode("utf-8")) for m in messages) > 32000:
