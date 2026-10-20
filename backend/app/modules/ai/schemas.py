@@ -2,7 +2,8 @@ from typing import Literal
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, StrictInt, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, computed_field, field_validator, model_validator
+from app.modules.ai.answer_format import answer_document
 from app.modules.notes.schemas import Input, Title
 
 
@@ -133,6 +134,11 @@ class RunCreate(BaseModel):
         return value
 
 
+class FormattedAnswer(BaseModel):
+    body_json: dict | None
+    fallback: bool
+
+
 class RunOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: UUID
@@ -148,6 +154,16 @@ class RunOut(BaseModel):
     finished_at: datetime | None
     source: PdfSourceOut | None = None
     progress: PdfProgress | None = None
+
+    @computed_field
+    @property
+    def formatted_answer(self) -> FormattedAnswer | None:
+        # Stream deltas remain plain text. Format one terminal snapshot, using
+        # the same parser as saved notes, without changing the original answer.
+        if self.status in {"queued", "running"} or not self.answer:
+            return None
+        body = answer_document(self.answer)
+        return FormattedAnswer(body_json=body, fallback=body is None)
 
 
 class ConversationDetail(ConversationOut):

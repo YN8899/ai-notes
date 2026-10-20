@@ -53,8 +53,16 @@ iniconfig==2.3.1
     # via pytest
 mako==1.4.3
     # via alembic
+markdown-it-py==4.2.0
+    # via
+    #   ai-notes-backend
+    #   mdit-py-plugins
 markupsafe==3.0.4
     # via mako
+mdit-py-plugins==0.6.1
+    # via ai-notes-backend
+mdurl==0.1.2
+    # via markdown-it-py
 opentelemetry-api==1.45.1
     # via fastapi
 packaging==26.3
