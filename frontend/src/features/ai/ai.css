@@ -40,4 +40,13 @@
 .citation-link{display:inline;border:0;border-bottom:1px solid #729581;background:#edf3eb;color:#285641;font:inherit;border-radius:4px;padding:0 5px;cursor:pointer;margin:0 2px}
 .pdf-source-reader{border:1px solid #cbd6ca;border-radius:10px;padding:14px;margin-top:16px;scroll-margin-top:20px}
 .pdf-source-reader .image-reader-viewport{height:65vh;min-height:280px}
+.save-answer{margin-top:16px}
+.save-answer-form,.saved-answer-source{border:1px solid #d7e2d5;border-radius:10px;background:#f5f7f2;padding:16px;margin:16px 0;overflow-wrap:anywhere;min-width:0}
+.save-answer-form h4,.saved-answer-source h4{margin:0 0 10px}
+.save-answer-form label{display:flex;flex-direction:column;gap:8px;margin:12px 0;font-size:13px;color:#586c5d}
+.save-answer-form input,.save-answer-form select{font:inherit;color:#243e36;background:#fff;border:1px solid #cbd6ca;border-radius:8px;padding:10px;width:100%;min-width:0}
+.save-answer-form p,.saved-answer-source p{font-size:13px;line-height:1.7;margin:10px 0}
+.saved-answer-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:14px;font-size:13px;overflow-wrap:anywhere}
+.saved-answer-source details{margin-top:14px}
+.saved-answer-source summary{cursor:pointer;font-size:13px;margin-bottom:10px}
 @media(max-width:850px){.chat-layout{grid-template-columns:minmax(0,1fr)}.chat-history{max-height:220px}.chat-main{padding:20px}.chat-controls{flex-wrap:wrap}}

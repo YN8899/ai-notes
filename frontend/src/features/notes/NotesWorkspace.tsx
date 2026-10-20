@@ -9,7 +9,7 @@ import type { Folder,Notebook,Tag,Note,NoteList,NoteSummary } from './types'
 import { PdfImportForm } from '../files/PdfImport'
 import './notes.css'
 const foldersEmpty:Folder[]=[],notebooksEmpty:Notebook[]=[],tagsEmpty:Tag[]=[]
-export default function NotesWorkspace({owner}:{owner:string}) {
+export default function NotesWorkspace({owner,initialNoteId}:{owner:string;initialNoteId?:string}) {
   const client=useQueryClient()
   const mounted=useRef(true)
   useEffect(()=>{mounted.current=true;return()=>{mounted.current=false}},[])
@@ -17,7 +17,7 @@ export default function NotesWorkspace({owner}:{owner:string}) {
   const notebooks=useQuery({queryKey:['notes',owner,'notebooks'],queryFn:()=>api<Notebook[]>('/notebooks')})
   const tags=useQuery({queryKey:['notes',owner,'tags'],queryFn:()=>api<Tag[]>('/tags')})
   const [filters,setFilters]=useState({q:'',kind:'',folder_id:'',notebook_id:'',tag_id:'',deleted:false})
-  const [cursors,setCursors]=useState<string[]>(['']),[selected,setSelected]=useState(()=>selectedNote(owner)),[newTitle,setNewTitle]=useState(''),[newKind,setNewKind]=useState<'text'|'image'>('text'),[busy,setBusy]=useState(false),[error,setError]=useState<unknown>(null)
+  const [cursors,setCursors]=useState<string[]>(['']),[selected,setSelected]=useState(()=>initialNoteId||selectedNote(owner)),[newTitle,setNewTitle]=useState(''),[newKind,setNewKind]=useState<'text'|'image'>('text'),[busy,setBusy]=useState(false),[error,setError]=useState<unknown>(null)
   const deferredQ=useDeferredValue(filters.q)
   const params=new URLSearchParams({limit:'20',deleted:String(filters.deleted)})
   for(const [key,value] of Object.entries({...filters,q:deferredQ}))if(key!=='deleted'&&typeof value==='string'&&value)params.set(key,value)
