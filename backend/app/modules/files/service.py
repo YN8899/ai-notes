@@ -2,7 +2,7 @@ from datetime import timedelta
 from functools import lru_cache
 from uuid import uuid4
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, text
 from sqlalchemy.dialects.postgresql import insert
 
 from app.modules.files import schemas as s
@@ -254,6 +254,28 @@ def read_ticket(db, user, file_id, raw, kind):
         raise AppError(503, "file_unavailable", "图片文件暂不可用") from None
 
 
+def _discard_unpublished_variants(file_id, written):
+    if not written:
+        return
+    keys = [key for _, key, _ in written]
+    try:
+        # Wait for an uncertain publication transaction to finish before reading
+        # its references. A plain SELECT could miss still-uncommitted variants.
+        with SessionLocal() as db, db.begin():
+            db.execute(text("SET LOCAL lock_timeout = '2s'"))
+            db.scalar(select(File.id).where(File.id == file_id).with_for_update())
+            # File exists before processing; only exact variant keys prove publication.
+            referenced = set(db.scalars(select(FileVariant.object_key).where(FileVariant.object_key.in_(keys))))
+    except Exception:
+        return  # Unknown database state: retain objects rather than risk data loss.
+    for key in keys:
+        if key not in referenced:
+            try:
+                storage().delete(key)
+            except Exception:
+                pass  # Cleanup must not replace the handler's original failure.
+
+
 def process_job(claimed):
     from uuid import UUID
 
@@ -266,43 +288,46 @@ def process_job(claimed):
     written = []
     result = None
     try:
-        original = storage().read(key)
-        if len(original) > settings().upload_max_bytes:
-            raise InvalidImage("file_too_large")
-        result = process_image(original, mime, settings().upload_max_pixels)
-        # Token-qualified keys prevent an expired worker from replacing a new worker's output.
-        prefix = key.rsplit("/", 1)[0]
-        for kind, data in (("reading", result.reading), ("thumbnail", result.thumbnail)):
-            variant_key = f"{prefix}/{claimed['token']}-{kind}.jpg"
-            storage().put(variant_key, data)
-            written.append((kind, variant_key, len(data)))
-        error = None
-    except InvalidImage as exc:
-        error = str(exc)
-    with SessionLocal.begin() as db:
-        job = db.scalar(select(Job).where(Job.id == claimed["id"]).with_for_update())
-        if (not job or job.status != "running" or job.worker_token != claimed["token"]
-                or job.lease_until <= utcnow()):
-            for _, orphan, _ in written:
-                storage().delete(orphan)
-            return False
-        file = db.scalar(select(File).where(File.id == file_id).with_for_update())
+        try:
+            original = storage().read(key)
+            if len(original) > settings().upload_max_bytes:
+                raise InvalidImage("file_too_large")
+            result = process_image(original, mime, settings().upload_max_pixels)
+            # Token-qualified keys prevent an expired worker from replacing a new worker's output.
+            prefix = key.rsplit("/", 1)[0]
+            for kind, data in (("reading", result.reading), ("thumbnail", result.thumbnail)):
+                variant_key = f"{prefix}/{claimed['token']}-{kind}.jpg"
+                # A provider can persist an object and then lose the PUT response.
+                written.append((kind, variant_key, len(data)))
+                storage().put(variant_key, data)
+            error = None
+        except InvalidImage as exc:
+            error = str(exc)
+        with SessionLocal.begin() as db:
+            job = db.scalar(select(Job).where(Job.id == claimed["id"]).with_for_update())
+            if (not job or job.status != "running" or job.worker_token != claimed["token"]
+                    or job.lease_until <= utcnow()):
+                return False
+            file = db.scalar(select(File).where(File.id == file_id).with_for_update())
+            if error:
+                file.status, file.error_code = "rejected", error
+            else:
+                file.status, file.error_code = "ready", None
+                file.sha256, file.width, file.height = result.sha256, result.width, result.height
+                for kind, object_key, size in written:
+                    db.execute(insert(FileVariant).values(id=uuid4(), file_id=file.id, kind=kind,
+                               object_key=object_key, bytes=size, created_at=utcnow()).on_conflict_do_nothing(
+                                   constraint="uq_file_variant_kind"))
+            job.status, job.result = "succeeded", {"file_id": str(file.id), "accepted": error is None}
+            job.error_code, job.worker_token, job.lease_until = None, None, None
+            db.add(Outbox(user_id=file.owner_id, job_id=job.id, kind="image.processed",
+                          payload={"message": "图片未通过校验，请检查文件后重新上传" if error else "图片处理完成，可以阅读了"}))
         if error:
-            file.status, file.error_code = "rejected", error
-        else:
-            file.status, file.error_code = "ready", None
-            file.sha256, file.width, file.height = result.sha256, result.width, result.height
-            for kind, object_key, size in written:
-                db.execute(insert(FileVariant).values(id=uuid4(), file_id=file.id, kind=kind,
-                           object_key=object_key, bytes=size, created_at=utcnow()).on_conflict_do_nothing(
-                               constraint="uq_file_variant_kind"))
-        job.status, job.result = "succeeded", {"file_id": str(file.id), "accepted": error is None}
-        job.error_code, job.worker_token, job.lease_until = None, None, None
-        db.add(Outbox(user_id=file.owner_id, job_id=job.id, kind="image.processed",
-                      payload={"message": "图片未通过校验，请检查文件后重新上传" if error else "图片处理完成，可以阅读了"}))
-    if error:
-        storage().delete(key)
-    return True
+            storage().delete(key)
+        return True
+    finally:
+        # Also discard keys skipped by a uniqueness conflict on a successful retry.
+        _discard_unpublished_variants(file_id, written)
 
 
 def maintenance():

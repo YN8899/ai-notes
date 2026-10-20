@@ -1,9 +1,10 @@
-import { lazy, Suspense, useEffect, useState, type FormEvent, type ReactNode } from 'react'
+import { lazy, Suspense, useEffect, useState, useSyncExternalStore, type FormEvent, type ReactNode } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { BookOpen, ArrowUpRight, LayoutDashboard, Ticket, Users, ShieldCheck, Activity, LogOut, Bell, RefreshCw, Check, ChevronRight, KeyRound, Copy, MessageSquare } from 'lucide-react'
 import { api, date, ApiError, type User, type Invite, type CreatedInvite, type Job, type Notice, type Audit, type LoginInput, type RegisterInput, type ResetInput } from './api'
 
 import { clearUserDrafts,rememberSection,rememberNote,wasNotesOpen,wasChatOpen } from './features/notes/drafts'
+import { authSession,startSessionSync } from './session.ts'
 const NotesWorkspace=lazy(()=>import('./features/notes/NotesWorkspace'))
 const AiChat=lazy(()=>import('./features/ai/AiChat'))
 const AiSettings=lazy(()=>import('./features/ai/AiSettings'))
@@ -16,21 +17,23 @@ function ErrorMessage({error}:{error:unknown}) {
 function Empty({children}:{children:ReactNode}) {return <div className="empty">{children}</div>}
 function Status({value}:{value:string}) {return <span className={'badge '+value}>{statuses[value]||value}</span>}
 
-function AuthScreen() {
+function AuthScreen({notice,error}:{notice?:string;error?:unknown}) {
   const client=useQueryClient()
   const [mode,setMode]=useState<'login'|'register'|'reset'>('login')
   const mutation=useMutation({mutationFn:async(form:HTMLFormElement)=>{
+    const ticket=authSession.ticket(),submittedMode=mode
     const data=Object.fromEntries(new FormData(form))
-    if(mode==='reset') return api('/auth/password/reset','POST',data as ResetInput)
-    return api<User>(mode==='login'?'/auth/login':'/auth/register','POST',data as LoginInput|RegisterInput)
-  },onSuccess:()=>{if(mode==='reset'){setMode('login');mutation.reset()}else client.invalidateQueries({queryKey:['me']})}})
+    const value=submittedMode==='reset'?await api('/auth/password/reset','POST',data as ResetInput):await api<User>(submittedMode==='login'?'/auth/login':'/auth/register','POST',data as LoginInput|RegisterInput)
+    return {ticket,mode:submittedMode,value}
+  },onSuccess:result=>{if(!authSession.current(result.ticket))return;if(result.mode==='reset'){setMode('login');mutation.reset()}else{const session=authSession.login((result.value as User).id,result.ticket);client.setQueryData(['me',session.generation],result.value)}}})
   function submit(e:FormEvent<HTMLFormElement>){e.preventDefault();mutation.mutate(e.currentTarget)}
   const title=mode==='login'?'欢迎回到知页':mode==='register'?'开始你的学习空间':'恢复账户访问'
   return <main className="auth-layout">
     <section className="auth-story"><div className="brand"><BookOpen size={28}/>知页 <span>AI NOTES</span></div><div><p className="eyebrow">你的知识，慢慢积累。</p><h1>让每一页笔记，<br/>成为下一次理解的起点。</h1><p>一个属于你和朋友的学习空间。<br/>记录思考，连接知识，一起往前走。</p></div><span className="story-footer">个人学习空间 · 邀请制</span></section>
     <section className="auth-form"><div className="mini-brand"><BookOpen/> 知页</div><p className="eyebrow">学习，从这里继续</p><h2>{title}</h2><p className="muted">{mode==='register'?'使用管理员提供的邀请码注册。':mode==='reset'?'输入管理员核实身份后提供的一次性凭证。':'登录后查看你的账户与学习空间。'}</p>
+      {notice?<p className="error" role="alert">{notice}</p>:null}<ErrorMessage error={error}/>
       <form onSubmit={submit} key={mode}>
-        {mode!=='reset'?<label>用户名<input name="username" required minLength={3} maxLength={32} pattern="[a-zA-Z0-9_-]+" autoComplete="username" placeholder="3–32 位字母、数字或下划线"/></label>:<label>重置凭证<input name="token" required minLength={20} maxLength={128} autoComplete="off"/></label>}
+        {mode!=='reset'?<label>用户名<input name="username" required minLength={3} maxLength={32} pattern={'[a-zA-Z0-9_\\-]+'} autoComplete="username" placeholder="3–32 位字母、数字或下划线"/></label>:<label>重置凭证<input name="token" required minLength={20} maxLength={128} autoComplete="off"/></label>}
         {mode==='register'?<label>显示名称<input name="display_name" required maxLength={64} placeholder="朋友如何称呼你"/></label>:null}
         <label>{mode==='reset'?'新密码':'密码'}<input name="password" type="password" required minLength={mode==='login'?1:10} maxLength={128} autoComplete={mode==='login'?'current-password':'new-password'} placeholder={mode==='login'?'输入密码':'至少 10 位'}/></label>
         {mode==='register'?<label>邀请码<input name="invite_code" required minLength={20} maxLength={128} autoComplete="off" placeholder="粘贴管理员提供的邀请码"/></label>:null}
@@ -91,17 +94,35 @@ function Home({user,onGo}:{user:User;onGo:(s:Section)=>void}) {
 
 export default function App() {
   const client=useQueryClient()
+  const session=useSyncExternalStore(authSession.subscribe,authSession.snapshot)
   const [section,setSection]=useState<Section>('home')
   const [noteToOpen,setNoteToOpen]=useState('')
-  const me=useQuery({queryKey:['me'],queryFn:()=>api<User>('/auth/me')})
+  const [storageNotice,setStorageNotice]=useState('')
+  useEffect(()=>{
+    let previous=authSession.ticket()
+    const unsubscribe=authSession.subscribe(()=>{
+      const next=authSession.ticket(),old=previous;previous=next
+      if(next.generation===old.generation)return
+      // Abort/remove old queries before any delayed response can repopulate a private screen.
+      void client.cancelQueries();client.clear()
+      if(old.owner&&(next.phase==='closing'||next.phase==='anonymous'||next.owner!==old.owner)&&!clearUserDrafts(old.owner))setStorageNotice('界面已锁定，但浏览器未允许清理本机草稿。请清理本站点的浏览器数据。')
+      setNoteToOpen('');setSection('home')
+    })
+    const stop=startSessionSync(()=>{void client.invalidateQueries({queryKey:['me']})})
+    return()=>{stop();unsubscribe()}
+  },[client])
+  const me=useQuery({queryKey:['me',session.generation],queryFn:async()=>{const ticket=authSession.ticket();const user=await api<User>('/auth/me');authSession.verify(user.id,ticket);return user},enabled:session.phase==='checking'||session.phase==='active'})
   useEffect(()=>{if(me.data?.id){if(wasNotesOpen(me.data.id))setSection('notes');else if(wasChatOpen(me.data.id))setSection('chat')}},[me.data?.id])
   function go(next:Section){if(me.data)rememberSection(me.data.id,next);setNoteToOpen('');setSection(next)}
-  const logout=useMutation({mutationFn:()=>api('/auth/logout','POST',{}),onSuccess:()=>{if(me.data)clearUserDrafts(me.data.id);client.removeQueries({predicate:q=>q.queryKey[0]!=='me'});setNoteToOpen('');setSection('home');client.resetQueries({queryKey:['me']})}})
+  const logout=useMutation({mutationFn:async()=>{const closing=authSession.beginLogout(authSession.ticket());try{await api('/auth/logout','POST',{})}finally{authSession.invalidate(closing)}}})
+  if(session.phase==='closing')return <div className="loading">正在退出登录，已暂停本机编辑…</div>
+  if(session.phase==='anonymous')return <AuthScreen notice={storageNotice} error={logout.error}/>
   if(me.isPending) return <div className="loading">正在连接你的学习空间…</div>
   if(!me.data || (me.error instanceof ApiError&&me.error.status===401)) {
     if(me.error instanceof ApiError&&me.error.status===401) return <AuthScreen/>
     return <main className="connection-error"><BookOpen size={36}/><h2>暂时无法连接学习空间</h2><ErrorMessage error={me.error}/><button className="primary" onClick={()=>me.refetch()}>重新连接</button></main>
   }
+  if(session.phase!=='active'||session.owner!==me.data.id)return <div className="loading">正在核对登录状态…</div>
   const user=me.data
   const nav=[{id:'home' as const,label:'空间概览',icon:LayoutDashboard},{id:'notes' as const,label:'我的笔记',icon:BookOpen},{id:'chat' as const,label:'AI 对话',icon:MessageSquare},{id:'ai' as const,label:'模型设置',icon:KeyRound},{id:'jobs' as const,label:'后台任务',icon:Activity},...(user.role==='admin'?[{id:'invites' as const,label:'邀请码',icon:Ticket},{id:'users' as const,label:'成员管理',icon:Users},{id:'audit' as const,label:'操作记录',icon:ShieldCheck}]:[])]
   const titles:Record<Section,string>={home:'空间概览',notes:'我的笔记',chat:'AI 对话',ai:'模型设置',invites:'邀请码管理',users:'成员管理',jobs:'后台任务',audit:'操作记录'}
