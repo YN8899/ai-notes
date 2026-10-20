@@ -4,6 +4,7 @@ import { api, date, ApiError, type AiCatalog } from '../../api'
 import { active, readStream, type Conversation, type Detail, type Run } from './chat-stream'
 import { CitedAnswer, PdfPicker, PdfRunScope, SourceReader, emptyChoice, type PdfChoice, type PdfBook, type PdfDetail, type PdfInput, type PdfPreview } from './PdfSources'
 import { parsePages, pageRange } from './pdf-pages'
+import { SaveAnswer, type SavedAnswer } from './SaveAnswer'
 import './ai.css'
 
 const labels:Record<Run['status'],string>={queued:'等待生成',running:'正在回复',succeeded:'已完成',cancelled:'已取消',interrupted:'回复中断',failed:'生成失败',truncated:'达到输出上限'}
@@ -11,7 +12,7 @@ const errors:Record<string,string>={credential_rejected:'共享模型凭据不�
 function message(error:unknown) {return error instanceof Error ? error.message : '操作失败，请重新读取'}
 const pdfErrors:Record<string,string>={pdf_source_unavailable:'来源 PDF 已删除、页面已失效或权限不可用，已停止后续调用。',pdf_storage_unavailable:'读取页图时存储暂不可用，未自动重发模型请求。',pdf_context_too_large:'资料超过本次处理大小上限，请选择更少页面。',pdf_summary_too_large:'阅读记录超过汇总预算，本次未完成全部处理。',pdf_summary_truncated:'部分阅读记录被模型截断，本次未完成全部处理。',pdf_plan_invalid:'处理计划异常，本次已停止。'}
 
-export default function AiChat({owner}:{owner:string}) {
+export default function AiChat({owner,onOpenNote}:{owner:string;onOpenNote?:(noteId:string)=>void}) {
   const client=useQueryClient()
   const storageKey=`ai-notes:chat:${owner}`
   const [selected,setSelected]=useState(()=>{try{return sessionStorage.getItem(storageKey)||''}catch{return ''}})
@@ -37,6 +38,8 @@ export default function AiChat({owner}:{owner:string}) {
   const pdfReady=!pdfChoice.noteId||!!(pdf&&preview.data&&!preview.isFetching&&!preview.error)
   const detailKey=['ai-conversation',owner,selected]
   const detail=useQuery({queryKey:detailKey,queryFn:()=>api<Detail>('/ai/conversations/'+selected),enabled:!!selected})
+  const savedNotes=useQuery({queryKey:['ai-saved-notes',owner,selected],queryFn:()=>api<SavedAnswer[]>(`/ai/conversations/${selected}/saved-notes`),enabled:!!selected,retry:false})
+  const savedByRun=new Map(savedNotes.data?.map(row=>[row.run_id,row]))
   const latest=detail.data?.runs.at(-1)
   const busy=active(latest)
 
@@ -123,6 +126,7 @@ export default function AiChat({owner}:{owner:string}) {
       {error?<div className="error" role="alert">{message(error)}</div>:null}
       {catalog.data&&!catalog.data.platform_enabled?<p className="error">共享模型服务尚未配置，请联系管理员。</p>:null}
       {selected&&detail.isPending?<p>正在打开对话…</p>:null}
+      {savedNotes.error?<div className="error" role="alert">无法核对已保存的笔记：{message(savedNotes.error)}<button type="button" className="text-button" onClick={()=>void savedNotes.refetch()}>重新核对保存状态</button></div>:null}
       {!selected?<div className="empty">点击“新建对话”，无需填写个人 API Key。</div>:null}
       <div className="chat-messages" aria-label="对话记录">{detail.data?.runs.map(run=><article className="chat-turn" key={run.id}>
         <div className="chat-question"><small>你</small><p>{run.prompt}</p></div>
@@ -131,7 +135,8 @@ export default function AiChat({owner}:{owner:string}) {
           <div className="chat-answer-text">{run.answer?<CitedAnswer run={run} onOpen={openSource}/>:(active(run)?(run.source?'正在读取所选资料，完成后显示回答…':'正在准备回复…'):'本次没有生成完整正文。')}</div>
           {run.error_code?<p className="chat-warning">{errors[run.error_code]||pdfErrors[run.error_code]||'本次回复未完成。'}</p>:null}
           {run.usage?.total_tokens!==undefined?<small>{run.source?'已知用量':'用量'}：{run.usage.total_tokens} tokens{run.source&&!run.progress?.usage_complete?' · 尚有调用未返回完整用量':''}</small>:!active(run)&&run.status!=='succeeded'?<small>本次用量未完整返回；已产生的用量仍可能计费。</small>:null}
-          {sourceView?.run.id===run.id?<SourceReader owner={owner} run={run} page={sourceView.page} onClose={closeSource}/>:null}
+          <SaveAnswer owner={owner} run={run} saved={savedByRun.get(run.id)} savedReady={savedNotes.data!==undefined&&!savedNotes.error} onOpenNote={onOpenNote}/>
+          {sourceView?.run.id===run.id?<SourceReader owner={owner} runId={run.id} page={sourceView.page} onClose={closeSource}/>:null}
         </div></article>)}</div>
       {streamError?<div className="error" role="alert">{streamError}<button className="text-button" onClick={()=>{detail.refetch();setReadVersion(v=>v+1)}}>重新读取</button></div>:null}
       {selected?<form className="chat-composer" onSubmit={submit}>

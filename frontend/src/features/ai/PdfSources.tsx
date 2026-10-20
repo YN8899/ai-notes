@@ -58,11 +58,11 @@ export function PdfRunScope({run,onOpen}:{run:Run;onOpen:(run:Run,page:Ref)=>voi
   </div>
 }
 
-export function SourceReader({owner,run,page,onClose}:{owner:string;run:Run;page:Ref;onClose:()=>void}) {
+export function SourceReader({owner,runId,page,onClose,closeLabel='返回对话'}:{owner:string;runId:string;page:Ref;onClose:()=>void;closeLabel?:string}) {
   const container=useRef<HTMLElement>(null)
-  const query=useQuery({queryKey:['ai-source',owner,run.id,page.page_id],queryFn:()=>api<SourcePage>(`/ai/runs/${run.id}/source-pages/${page.page_id}`),retry:false})
-  useEffect(()=>{container.current?.scrollIntoView({block:'start',behavior:'smooth'})},[run.id,page.page_id,query.data])
-  return <section className="pdf-source-reader" ref={container} aria-label="来源原页"><div className="panel-heading"><h4>来源原页 · 第 {page.number} 页</h4><button type="button" className="secondary" onClick={onClose}>返回对话</button></div>
+  const query=useQuery({queryKey:['ai-source',owner,runId,page.page_id],queryFn:()=>api<SourcePage>(`/ai/runs/${runId}/source-pages/${page.page_id}`),retry:false})
+  useEffect(()=>{container.current?.scrollIntoView({block:'start',behavior:'smooth'})},[runId,page.page_id,query.data])
+  return <section className="pdf-source-reader" ref={container} aria-label="来源原页"><div className="panel-heading"><h4>来源原页 · 第 {page.number} 页</h4><button type="button" className="secondary" onClick={onClose}>{closeLabel}</button></div>
     {query.isPending?<p>正在验证来源权限…</p>:query.error?<p className="error" role="alert">{query.error instanceof Error?query.error.message:'来源已不可用'}</p>:query.data?<>
       {query.data.source_changed?<p className="chat-warning">来源笔记已更新。此引用对应版本 {query.data.source_revision} 的原 PDF 页图，页码不随笔记排序改变。</p>:null}
       <ImageReader key={query.data.file_id} fileId={query.data.file_id} filename={query.data.title+' · 原 PDF 第'+query.data.page_number+'页'}/>

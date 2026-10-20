@@ -14,11 +14,12 @@ M1 开发中，版本 0.1.0。手机和电脑共用 React 前端，后端为 Fas
 - PDF 导入为多页图片笔记，保留原件、显示后台逐页进度，支持断点重试与原件下载；默认 50 MiB / 200 页。
 - 私有 OSS 官方 SDK 适配器与权限校验后的图片代理；开发环境可使用本地私有存储。
 - 管理员在本机后端统一配置 DeepSeek Key，所有登录成员共用；受控能力表与管理员手动连接测试，网页不显示或收集个人 Key。
+- AI 文字与 PDF 选页 / 整本对话；成功回答可选标题和笔记本保存为可编辑笔记，保留问题、模型与独立 PDF 原页引用，重复保存不覆盖编辑或重建回收站笔记。
 - 持久任务队列、去重、租约续期、过期回收、退避重试和失败任务人工重试。
 - 事务 Outbox 和幂等站内通知投递；可在网页发起后台自检并查看真实结果。
 - Alembic 初始迁移、OpenAPI 与生成的 TypeScript 类型、依赖锁文件、Docker Compose 和 GitHub Actions CI。
 
-当前暂用“私有 OSS + 后端图片代理”，无需 OSS 图片自定义域名。配置见 [OSS私有存储与图片代理配置](docs/OSS私有存储与图片代理配置.md)。ECS 已更换为 Ubuntu 24.04，采用 GitHub 获取代码、GitHub Actions 构建、杭州 ACR 个人版分发镜像和 Compose 私有开发联调，步骤见 [Ubuntu服务器部署与运维](docs/Ubuntu服务器部署与运维.md)；进度见 [M1开发与云端验收计划](docs/M1开发与云端验收计划.md)。真实 OSS SDK 联调与本机网页上传 → Worker 生成阅读图/缩略图 → 后端代理阅读已通过。ECS 应用部署和完整 M1 尚未验收。共享模型配置已开放，启用方式见 [共享模型与DeepSeek配置](docs/共享模型与DeepSeek配置.md)；AI 文字对话已开放，使用方式见 [AI文字对话与运行恢复](docs/AI文字对话与运行恢复.md)；PDF 选页与整本提问已开放，见 [PDF对话说明](docs/PDF选页与整本AI对话.md)；OCR、复习与社区仍未开放，笔记功能不依赖模型 Key。
+当前暂用“私有 OSS + 后端图片代理”，无需 OSS 图片自定义域名。配置见 [OSS私有存储与图片代理配置](docs/OSS私有存储与图片代理配置.md)。ECS 已更换为 Ubuntu 24.04，采用 GitHub 获取代码、GitHub Actions 构建、杭州 ACR 个人版分发镜像和 Compose 私有开发联调，步骤见 [Ubuntu服务器部署与运维](docs/Ubuntu服务器部署与运维.md)；进度见 [M1开发与云端验收计划](docs/M1开发与云端验收计划.md)。真实 OSS SDK 联调与本机网页上传 → Worker 生成阅读图/缩略图 → 后端代理阅读已通过。ECS 应用部署和完整 M1 尚未验收。共享模型配置已开放，启用方式见 [共享模型与DeepSeek配置](docs/共享模型与DeepSeek配置.md)；AI 文字对话已开放，使用方式见 [AI文字对话与运行恢复](docs/AI文字对话与运行恢复.md)；PDF 选页与整本提问已开放，见 [PDF对话说明](docs/PDF选页与整本AI对话.md)。回答保存功能已在本地实现，使用与边界见 [AI回答保存为笔记](docs/AI回答保存为笔记.md)，本机实测已通过。保存直接使用已有回答，不再调用模型；正文按普通文字保留，不自动转换 Markdown 或公式。OCR、复习与社区仍未开放，笔记功能不依赖模型 Key。
 
 ## 本地启动
 
@@ -111,7 +112,7 @@ npm run build
 | backend/app/modules/jobs | 后台任务、通知与队列服务 |
 | backend/app/modules/notes | 笔记组织、正文、版本、回收站 |
 | backend/app/modules/files | 私有存储、上传会话、图片处理与代理 |
-| backend/app/modules/ai | 共享模型状态、受控能力表与管理员连接测试 |
+| backend/app/modules/ai | 共享模型、文字与 PDF 对话、回答保存与来源引用 |
 | backend/app/shared | 配置、事务、模型、错误、安全与权限 |
 | backend/app/worker.py | 独立后台任务入口 |
 | backend/alembic | 可审查、可执行的数据库迁移 |
@@ -148,6 +149,8 @@ Outbox 将业务变更和事件保存在同一个数据库事务，通知投递�
 标准错误响应包含 code、message、request_id。日志不记录 Cookie、密码、邀请码、重置凭证、请求正文或签名 URL。停用用户阻止新访问并撤销会话；不把停用误当成删除用户数据。
 
 ## 当前验证范围
+
+2026-10-20 回答保存阶段：开发库备份及增量迁移、Alembic check、后端全量 182 项、前端 5 项、配置 6 项和生产构建通过。桌面与手机尺寸完成保存、丢响应后重试、编辑与来源原页回看；新增模型调用为零。见 [本阶段记录](docs/task-evidence/2026-10-20-save-ai-answer.md)。完整 M1 与云端部署仍未完成。
 
 2026-10-16 PDF 导入：后端全量 110 项、配置 6 项、自动保存回归与前端构建通过。真实本机网页上传中文三页 PDF、Worker 渲染、刷新继续、原页序/缩放、原件下载比对和加密文件提示均通过。使用见 [PDF笔记导入与逐页转换](docs/PDF笔记导入与逐页转换.md)，证据见 [本次验收](docs/task-evidence/2026-10-16-pdf-import.md)；真实 OSS PDF 和 ECS 部署未验收。
 

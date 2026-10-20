@@ -3,6 +3,7 @@ from datetime import datetime
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, field_validator, model_validator
+from app.modules.notes.schemas import Input, Title
 
 
 class AiModelOut(BaseModel):
@@ -151,3 +152,23 @@ class RunOut(BaseModel):
 
 class ConversationDetail(ConversationOut):
     runs: list[RunOut]
+
+
+class SaveAnswerIn(Input):
+    title: Title
+    notebook_id: UUID | None = None
+
+
+class SavedAnswerOut(BaseModel):
+    run_id: UUID
+    note_id: UUID
+    note_title: str
+    notebook_id: UUID | None
+    deleted_at: datetime | None
+    saved_at: datetime
+    source: PdfSourceOut | None
+    cited_page_numbers: list[int]
+
+
+class SavedAnswerProvenanceOut(SavedAnswerOut):
+    model: str

@@ -66,6 +66,7 @@ class AiRun(Entity, Base):
     progress: Mapped[dict | None] = mapped_column(JSONB)
     __table_args__ = (
         ForeignKeyConstraint(["owner_id", "conversation_id"], ["ai_conversations.owner_id", "ai_conversations.id"], name="fk_ai_run_conversation_owner"),
+        UniqueConstraint("owner_id", "id", name="uq_ai_run_owner"),
         UniqueConstraint("owner_id", "request_key", name="uq_ai_run_request"),
         CheckConstraint("status IN ('queued','running','succeeded','cancelled','interrupted','failed','truncated')", name="ai_run_status"),
         Index("ix_ai_runs_conversation", "owner_id", "conversation_id", "created_at"),
@@ -87,4 +88,20 @@ class AiStep(Entity, Base):
     __table_args__ = (
         UniqueConstraint("run_id", "position", name="uq_ai_step_position"),
         CheckConstraint("kind IN ('read','reduce','answer') AND status IN ('running','succeeded','failed')", name="ai_step_state"),
+    )
+
+
+class AiSavedNote(Entity, Base):
+    """One editable note per completed answer, with independent immutable provenance."""
+    __tablename__ = "ai_saved_notes"
+    owner_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"))
+    run_id: Mapped[uuid.UUID] = mapped_column()
+    note_id: Mapped[uuid.UUID] = mapped_column()
+    source: Mapped[dict | None] = mapped_column(JSONB)
+    cited_page_numbers: Mapped[list[int]] = mapped_column(JSONB, default=list)
+    __table_args__ = (
+        ForeignKeyConstraint(["owner_id", "run_id"], ["ai_runs.owner_id", "ai_runs.id"], name="fk_saved_ai_run_owner"),
+        ForeignKeyConstraint(["owner_id", "note_id"], ["notes.owner_id", "notes.id"], name="fk_saved_ai_note_owner"),
+        UniqueConstraint("owner_id", "run_id", name="uq_saved_ai_run"),
+        UniqueConstraint("note_id", name="uq_saved_ai_note"),
     )
