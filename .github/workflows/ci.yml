@@ -22,6 +22,7 @@ jobs:
     env:
       DATABASE_URL: postgresql+psycopg://notes:notes@localhost:5432/notes_test
       TEST_DATABASE_URL: postgresql+psycopg://notes:notes@localhost:5432/notes_test
+      SITE_BACKUP_TEST_CONTAINER: ${{ job.services.postgres.id }}
       APP_ORIGIN: http://testserver
       RATE_LIMIT_REQUESTS: 1000
     steps:
