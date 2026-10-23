@@ -11,9 +11,9 @@ export function backupDraft(owner:string,note:string,content:Content){localStora
 export function clearUserDrafts(owner:string) {
   const keys:string[]=[]; for(let i=0;i<localStorage.length;i++){const k=localStorage.key(i);if(k?.startsWith(prefix+owner+':'))keys.push(k)}
   keys.forEach(k=>localStorage.removeItem(k))
-  sessionStorage.removeItem(prefix+owner+':selected-note')
-  sessionStorage.removeItem(prefix+owner+':section')
+  clearTabNavigation(owner)
 }
+export function clearTabNavigation(owner:string){sessionStorage.removeItem(prefix+owner+':selected-note');sessionStorage.removeItem(prefix+owner+':section')}
 export function selectedNote(owner:string):string {try{return sessionStorage.getItem(prefix+owner+':selected-note')||''}catch{return ''}}
 export function rememberNote(owner:string,id:string){try{if(id)sessionStorage.setItem(prefix+owner+':selected-note',id);else sessionStorage.removeItem(prefix+owner+':selected-note')}catch{/* Navigation still works when browser storage is unavailable. */}}
 export function wasNotesOpen(owner:string):boolean{try{return sessionStorage.getItem(prefix+owner+':section')==='notes'}catch{return false}}

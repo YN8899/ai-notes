@@ -16,7 +16,16 @@ DB = Annotated[Session, Depends(get_db)]
 
 
 def current_user(request: Request, db: DB):
-    raw = request.cookies.get("notes_session", "")
+    # An explicit tab credential must never fall back to the shared Cookie jar.
+    authorization = request.headers.get("authorization")
+    request.state.tab_session = authorization is not None
+    if authorization is not None:
+        parts = authorization.split()
+        if len(parts) != 2 or parts[0].lower() != "bearer":
+            raise AppError(401, "login_required", "请先登录")
+        raw = parts[1]
+    else:
+        raw = request.cookies.get("notes_session", "")
     session = db.scalar(select(AuthSession).where(AuthSession.token_hash == digest(raw), AuthSession.revoked_at.is_(None), AuthSession.expires_at > utcnow()))
     if not session:
         raise AppError(401, "login_required", "请先登录")
@@ -49,6 +58,15 @@ Admin = Annotated[User, Depends(admin_user)]
 def preauth_csrf(request: Request):
     cookie, header = request.cookies.get("notes_csrf", ""), request.headers.get("x-csrf-token", "")
     if not cookie or not secrets.compare_digest(cookie, header):
+        raise AppError(403, "csrf_invalid", "请求验证失败，请刷新页面")
+
+
+def tab_preauth_csrf(request: Request):
+    # Tab login must not depend on a shared pre-login Cookie: simultaneous
+    # logins in fresh tabs could otherwise overwrite each other's CSRF Cookie.
+    # Same-origin + a mandatory custom header blocks cross-site simple requests;
+    # CORS is deliberately not enabled for these APIs.
+    if request.headers.get("origin") != settings().app_origin or request.headers.get("x-notes-client") != "tab":
         raise AppError(403, "csrf_invalid", "请求验证失败，请刷新页面")
 
 

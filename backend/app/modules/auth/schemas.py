@@ -34,6 +34,12 @@ class CsrfOut(BaseModel):
     csrf_token: str
 
 
+class TabSessionOut(BaseModel):
+    user: UserOut
+    session_token: str
+    csrf_token: str
+
+
 class OkOut(BaseModel):
     ok: bool = True
 

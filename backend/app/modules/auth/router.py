@@ -2,7 +2,7 @@ from datetime import timedelta
 from uuid import UUID
 from fastapi import APIRouter, Request, Response, Depends, Query
 from sqlalchemy import select, update
-from app.shared.dependencies import DB, CurrentUser, Admin, preauth_csrf, auth_rate_limit
+from app.shared.dependencies import DB, CurrentUser, Admin, preauth_csrf, tab_preauth_csrf, auth_rate_limit
 from app.shared.models import User, AuthSession, Invite, ResetToken, Audit
 from app.shared.security import token, digest
 from app.shared.db import utcnow
@@ -13,6 +13,7 @@ from app.modules.auth import schemas as s, service
 
 router = APIRouter()
 public_guards = [Depends(preauth_csrf), Depends(auth_rate_limit)]
+tab_public_guards = [Depends(tab_preauth_csrf), Depends(auth_rate_limit)]
 
 
 def set_auth_cookies(response, raw, csrf):
@@ -44,6 +45,18 @@ def login(data: s.LoginIn, request: Request, response: Response, db: DB):
     return user
 
 
+@router.post("/auth/tab/login", response_model=s.TabSessionOut, dependencies=tab_public_guards)
+def tab_login(data: s.LoginIn, request: Request, db: DB):
+    user, raw, csrf_value = service.login(db, data, request.state.request_id)
+    return {"user": user, "session_token": raw, "csrf_token": csrf_value}
+
+
+@router.post("/auth/tab/register", response_model=s.TabSessionOut, status_code=201, dependencies=tab_public_guards)
+def tab_register(data: s.RegisterIn, request: Request, db: DB):
+    user, raw, csrf_value = service.register(db, data, request.state.request_id)
+    return {"user": user, "session_token": raw, "csrf_token": csrf_value}
+
+
 @router.get("/auth/me", response_model=s.UserOut)
 def me(user: CurrentUser):
     return user
@@ -54,13 +67,20 @@ def logout(request: Request, response: Response, db: DB, user: CurrentUser):
     request.state.auth_session.revoked_at = utcnow()
     audit(db, user.id, "auth.logout", request.state.request_id, user.id)
     db.commit()
-    response.delete_cookie("notes_session", path="/")
-    response.delete_cookie("notes_csrf", path="/")
+    if not request.state.tab_session:
+        response.delete_cookie("notes_session", path="/")
+        response.delete_cookie("notes_csrf", path="/")
     return {"ok": True}
 
 
 @router.post("/auth/password/reset", response_model=s.OkOut, dependencies=public_guards)
 def reset(data: s.ResetIn, request: Request, db: DB):
+    service.reset_password(db, data, request.state.request_id)
+    return {"ok": True}
+
+
+@router.post("/auth/tab/password/reset", response_model=s.OkOut, dependencies=tab_public_guards)
+def tab_reset(data: s.ResetIn, request: Request, db: DB):
     service.reset_password(db, data, request.state.request_id)
     return {"ok": True}
 
