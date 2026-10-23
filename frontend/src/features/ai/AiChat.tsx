@@ -1,3 +1,4 @@
+import { createUuid } from '../../uuid'
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, date, ApiError, type AiCatalog } from '../../api'
@@ -29,7 +30,7 @@ export default function AiChat({owner,onOpenNote}:{owner:string;onOpenNote?:(not
   const [sourceView,setSourceView]=useState<{run:Run;page:NonNullable<Run['source']>['pages'][number]}|null>(null)
   const sourceTrigger=useRef<HTMLElement|null>(null),restoredSource=useRef('')
   const pending=useRef<{conversation:string;key:string;prompt:string;model:string;previous:string|null;pdf:PdfInput|null;image:ImageInput|null}|null>(null)
-  const newKey=useRef(crypto.randomUUID())
+  const newKey=useRef(createUuid())
   const sending=useRef(false)
   const conversations=useQuery({queryKey:['ai-conversations',owner],queryFn:()=>api<Conversation[]>('/ai/conversations')})
   const catalog=useQuery({queryKey:['ai-catalog',owner],queryFn:()=>api<AiCatalog>('/ai/providers')})
@@ -99,14 +100,14 @@ export default function AiChat({owner,onOpenNote}:{owner:string;onOpenNote?:(not
   },[latest?.id,busy,owner,selected,readVersion,client])
 
   const create=useMutation({mutationFn:()=>api<Conversation>('/ai/conversations','POST',{request_key:newKey.current}),onSuccess:row=>{
-    newKey.current=crypto.randomUUID();choose(row.id)
+    newKey.current=createUuid();choose(row.id)
     client.setQueryData<Detail>(['ai-conversation',owner,row.id],{...row,runs:[]})
     client.invalidateQueries({queryKey:['ai-conversations',owner]})
   }})
   const send=useMutation({mutationFn:async()=>{
     const previous=latest?.id||null
     if (!pending.current || pending.current.conversation!==selected || pending.current.prompt!==prompt || pending.current.model!==model || JSON.stringify(pending.current.pdf)!==JSON.stringify(pdf) || JSON.stringify(pending.current.image)!==JSON.stringify(image)) {
-      pending.current={conversation:selected,key:crypto.randomUUID(),prompt,model,previous,pdf,image}
+      pending.current={conversation:selected,key:createUuid(),prompt,model,previous,pdf,image}
     }
     const p=pending.current
     return api<Run>(`/ai/conversations/${p.conversation}/runs`,'POST',{request_key:p.key,prompt:p.prompt,model:p.model,previous_run_id:p.previous,pdf:p.pdf,image:p.image})

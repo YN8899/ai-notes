@@ -1,96 +1,90 @@
+import { createUuid } from './uuid.ts'
+
 export type SessionPhase='checking'|'active'|'anonymous'|'closing'
 export type SessionTicket={generation:number;id:string;owner:string|null;phase:SessionPhase;until?:number}
-export type SessionEvent={id:string;previous:string;owner:string|null;phase:'active'|'anonymous'|'closing';until?:number;bootstrap?:boolean}
 export class SessionChangedError extends Error {
   constructor(){super('登录状态已变化，请重新登录后操作。');this.name='AbortError'}
 }
 
-// The generation is local to a tab. Wire IDs identify one browser-cookie lifecycle,
-// so an old logout completion cannot invalidate a later login by the same owner.
-export function createSessionState(publish:(event:SessionEvent)=>void=()=>{},initial?:SessionEvent) {
-  const id=()=>crypto.randomUUID()
-  let state:SessionTicket={generation:0,id:initial?.id||id(),owner:initial?.owner||null,phase:initial?.phase==='anonymous'?'anonymous':initial?.phase==='closing'?'closing':'checking',until:initial?.until}
+// Generations protect this document; independent tabs never share logout.
+export function createSessionState() {
+  let state:SessionTicket={generation:0,id:createUuid(),owner:null,phase:'checking'}
   const listeners=new Set<()=>void>()
-  const retired=new Set<string>()
-  let pendingActive:{owner:string|null;previousId:string}|null=null
   const snapshot=()=>state
   const current=(ticket:SessionTicket,owner?:string)=>ticket.generation===state.generation&&ticket.id===state.id&&(owner===undefined||state.phase==='active'&&state.owner===owner)
-  function update(next:Omit<SessionTicket,'generation'>,advance=true){if(next.id!==state.id)retired.add(state.id);state={...next,generation:state.generation+(advance?1:0)};listeners.forEach(listener=>listener())}
-  function announce(phase:SessionEvent['phase'],owner:string|null,until?:number){pendingActive=null;const event:SessionEvent={id:id(),previous:state.id,owner,phase,...(until===undefined?{}:{until})};update(event);publish(event);return state}
+  function update(phase:SessionPhase,owner:string|null,advance=true,until?:number){state={generation:state.generation+(advance?1:0),id:advance?createUuid():state.id,owner,phase,until};listeners.forEach(listener=>listener());return state}
   return {
     snapshot,ticket:snapshot,current,
     subscribe(listener:()=>void){listeners.add(listener);return()=>{listeners.delete(listener)}},
-    login(owner:string,ticket:SessionTicket){if(!current(ticket)||state.phase==='closing')throw new SessionChangedError();return announce('active',owner)},
-    verify(owner:string,ticket:SessionTicket){
-      if(!current(ticket)||!['checking','active'].includes(state.phase))throw new SessionChangedError()
-      const pending=pendingActive;pendingActive=null
-      if(pending&&pending.owner!==owner&&state.owner===owner){retired.delete(pending.previousId);update({id:pending.previousId,owner,phase:'active'});return state}
-      if(state.owner&&state.owner!==owner)return announce('active',owner)
-      const unknown=!state.owner
-      update({...state,owner,phase:'active'},false)
-      if(unknown)publish({id:state.id,previous:state.id,owner,phase:'active',bootstrap:true})
-      return state
-    },
-    beginLogout(ticket:SessionTicket,until=Date.now()+15000){if(!current(ticket)||state.phase!=='active')throw new SessionChangedError();return announce('closing',state.owner,until)},
-    invalidate(ticket:SessionTicket,{broadcast=true}:{broadcast?:boolean}={}){
-      if(!current(ticket)||state.phase==='anonymous')return false
-      const identified=state.owner!==null
-      if(broadcast&&identified)announce('anonymous',null)
-      else {pendingActive=null;update({id:id(),owner:null,phase:'anonymous'})}
-      return true
-    },
-    check(){if(state.phase==='active')update({...state,phase:'checking'})},
-    receive(event:SessionEvent,authoritative=false){
-      if(event.id===state.id||retired.has(event.id))return
-      const bootstrap=event.phase==='active'&&(event.bootstrap||event.previous===event.id)
-      if(bootstrap&&state.phase==='closing'){publish({id:state.id,previous:event.id,owner:state.owner,phase:'closing',until:state.until});return}
-      if(bootstrap&&state.phase==='anonymous')return
-      if(event.phase!=='active'&&event.previous!==state.id&&!authoritative)return
-      // With storage disabled, concurrent first /me calls can discover the same
-      // cookie using different local IDs. A deterministic winner and reply make
-      // both tabs share one wire ID before subsequent logout notifications.
-      if(bootstrap&&['active','checking'].includes(state.phase)&&state.owner===event.owner&&state.id<event.id){publish({id:state.id,previous:event.id,owner:state.owner,phase:'active',bootstrap:true});return}
-      // A channel payload is a reason to verify the cookie, not proof of identity.
-      // Keep the verified owner until /me confirms a change, preserving its drafts.
-      if(event.phase==='active')pendingActive={owner:event.owner,previousId:pendingActive?.previousId||state.id}
-      else pendingActive=null
-      update({...event,owner:event.phase==='active'?state.owner:event.owner,phase:event.phase==='active'?'checking':event.phase})
-    },
+    login(owner:string,ticket:SessionTicket){if(!current(ticket)||state.phase==='closing')throw new SessionChangedError();return update('active',owner)},
+    verify(owner:string,ticket:SessionTicket){if(!current(ticket)||!['checking','active'].includes(state.phase))throw new SessionChangedError();return update('active',owner,state.owner!==null&&state.owner!==owner)},
+    beginLogout(ticket:SessionTicket,until=Date.now()+15000){if(!current(ticket)||state.phase!=='active')throw new SessionChangedError();return update('closing',state.owner,true,until)},
+    invalidate(ticket:SessionTicket,_options?:{broadcast?:boolean}){if(!current(ticket)||state.phase==='anonymous')return false;update('anonymous',null);return true},
+    reset(){return update('checking',null)},
+    check(){if(state.phase==='active')update('checking',state.owner)},
   }
 }
 
-const key='ai-notes:session:v1'
-function parse(value:unknown):SessionEvent|null {
-  if(typeof value!=='object'||value===null)return null
-  const event=value as Partial<SessionEvent>
-  if(typeof event.id!=='string'||typeof event.previous!=='string'||!(typeof event.owner==='string'||event.owner===null)||!['active','anonymous','closing'].includes(event.phase||''))return null
-  if(event.bootstrap!==undefined&&typeof event.bootstrap!=='boolean')return null
-  if(event.phase==='closing'&&(!Number.isFinite(event.until)||Number(event.until)>Date.now()+20000))return null
-  return event as SessionEvent
-}
-function readMarker(){try{return parse(JSON.parse(localStorage.getItem(key)||'null'))}catch{return null}}
-let channel:BroadcastChannel|null=null,storageWritable=true
-export const authSession=createSessionState(event=>{
-  try{localStorage.setItem(key,JSON.stringify(event));storageWritable=true}catch{storageWritable=false}
-  try{channel?.postMessage({event,persisted:storageWritable})}catch{/* Focus verification remains available. */}
-},typeof window==='undefined'?undefined:readMarker()||undefined)
+const storageKey='ai-notes:tab-session:v1'
+export const sessionEndedEvent='ai-notes:session-ended'
+export interface TabSession { session_token:string;csrf_token:string;scope:string }
+export const authSession=createSessionState()
 
-export function receiveSessionEvent(session:ReturnType<typeof createSessionState>,event:SessionEvent,latest:SessionEvent|null,persisted=true){
-  if(persisted&&latest&&latest.id!==event.id)return
-  session.receive(event,persisted&&latest?.id===event.id)
+export function createSessionStore(storage:Pick<Storage,'getItem'|'setItem'|'removeItem'>){
+  return {
+    read():TabSession|null {
+      const raw=storage.getItem(storageKey)
+      if(!raw)return null
+      try{const value=JSON.parse(raw);if(value&&typeof value.session_token==='string'&&value.session_token.length>=20&&typeof value.csrf_token==='string'&&value.csrf_token.length>=20&&typeof value.scope==='string')return value}catch{/* Discard malformed credentials without logging them. */}
+      storage.removeItem(storageKey);return null
+    },
+    save(value:TabSession){storage.setItem(storageKey,JSON.stringify(value))},
+    clear(){storage.removeItem(storageKey)},
+  }
+}
+function store(){return createSessionStore(window.sessionStorage)}
+export function readSession(){return store().read()}
+export function saveSession(value:Omit<TabSession,'scope'>){store().save({...value,scope:createUuid()});authSession.reset()}
+export function clearSession(expectedToken?:string){
+  if(expectedToken&&readSession()?.session_token!==expectedToken)return
+  store().clear();authSession.invalidate(authSession.ticket())
+  window.dispatchEvent(new Event(sessionEndedEvent))
+}
+export function sessionHeaders(session:TabSession):Record<string,string>{return {'Authorization':'Bearer '+session.session_token,'X-CSRF-Token':session.csrf_token}}
+
+let initialization:Promise<void>|undefined
+export function shouldRestoreSession(navigationType:string|undefined){return navigationType==='reload'}
+export function initializeTabSession():Promise<void>{
+  if(initialization)return initialization
+  initialization=new Promise<void>(resolve=>{
+    const navigation=performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming|undefined
+    if(!shouldRestoreSession(navigation?.type))clearSession()
+    if(typeof BroadcastChannel==='undefined'){resolve();return}
+    // Only the random scope is broadcast to detect copied sessionStorage.
+    const channel=new BroadcastChannel('ai-notes:tab-ownership:v1')
+    const claim=createUuid(),started=performance.timeOrigin
+    let active=false
+    channel.onmessage=({data})=>{
+      const current=readSession()
+      if(!current||!data||data.scope!==current.scope)return
+      const earlier=typeof data.started==='number'&&(data.started<started||(data.started===started&&data.claim<claim))
+      if(data.type==='claim'&&data.claim!==claim&&(active||!earlier))channel.postMessage({type:'claimed',scope:current.scope,target:data.claim,claim,started})
+      else if(data.type==='claimed'&&data.target===claim&&earlier)clearSession(current.session_token)
+    }
+    const current=readSession()
+    if(!current){active=true;resolve();return}
+    channel.postMessage({type:'claim',scope:current.scope,claim,started})
+    setTimeout(()=>{active=true;resolve()},150)
+  })
+  return initialization
 }
 
 export function startSessionSync(onVerify?:()=>void){
-  function receive(value:unknown,persisted=true){const event=parse(value);if(!event)return;if(!persisted)storageWritable=false;const latest=storageWritable?readMarker():null;receiveSessionEvent(authSession,event,latest,persisted)}
-  try{channel=new BroadcastChannel(key);channel.onmessage=message=>receive(message.data?.event,message.data?.persisted!==false)}catch{channel=null}
-  const storage=(event:StorageEvent)=>{if(event.key===key&&event.newValue){try{receive(JSON.parse(event.newValue))}catch{/* Ignore unrelated or malformed storage. */}}}
-  const focus=()=>{const marker=storageWritable?readMarker():null;if(marker)receive(marker);if(navigator.onLine!==false&&['active','checking'].includes(authSession.snapshot().phase)){if(onVerify)onVerify();else authSession.check()}}
+  const focus=()=>{if(navigator.onLine!==false&&['active','checking'].includes(authSession.snapshot().phase))onVerify?.()}
   const visible=()=>{if(document.visibilityState==='visible')focus()}
   let timer:ReturnType<typeof setTimeout>|undefined
-  const closing=()=>{clearTimeout(timer);const ticket=authSession.ticket();if(ticket.phase==='closing')timer=setTimeout(()=>authSession.invalidate(ticket),Math.max(0,(ticket.until||Date.now())-Date.now()))}
+  const closing=()=>{clearTimeout(timer);const ticket=authSession.ticket();if(ticket.phase==='closing')timer=setTimeout(()=>{if(authSession.current(ticket))clearSession()},Math.max(0,(ticket.until||Date.now())-Date.now()))}
   const unsubscribe=authSession.subscribe(closing);closing()
-  window.addEventListener('storage',storage);window.addEventListener('focus',focus);window.addEventListener('online',focus);document.addEventListener('visibilitychange',visible)
-  // A tab may have slept through a channel event before the listeners were attached.
-  const marker=storageWritable?readMarker():null;if(marker)receive(marker)
-  return()=>{unsubscribe();clearTimeout(timer);channel?.close();channel=null;window.removeEventListener('storage',storage);window.removeEventListener('focus',focus);window.removeEventListener('online',focus);document.removeEventListener('visibilitychange',visible)}
+  window.addEventListener('focus',focus);window.addEventListener('online',focus);document.addEventListener('visibilitychange',visible)
+  return()=>{unsubscribe();clearTimeout(timer);window.removeEventListener('focus',focus);window.removeEventListener('online',focus);document.removeEventListener('visibilitychange',visible)}
 }

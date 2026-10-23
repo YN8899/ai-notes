@@ -1,5 +1,5 @@
 import type { components } from './api.generated'
-import { authSession,SessionChangedError } from './session.ts'
+import { authSession,clearSession,initializeTabSession,readSession,saveSession,sessionHeaders,SessionChangedError,type TabSession } from './session.ts'
 export type User = components['schemas']['UserOut']
 export type Invite = components['schemas']['InviteOut']
 export type CreatedInvite = components['schemas']['CreatedInvite']
@@ -15,40 +15,71 @@ export class ApiError extends Error {
   status:number;code:string;requestId:string
   constructor(status:number,code:string,message:string,requestId:string){super(message);this.status=status;this.code=code;this.requestId=requestId}
 }
-export async function api<T>(path:string, method='GET', body?:unknown):Promise<T> {
-  const ticket=authSession.ticket()
-  const publicAuth=['/auth/login','/auth/register','/auth/password/reset'].includes(path)
-  if(publicAuth&&ticket.phase==='closing'||!path.startsWith('/auth/')&&ticket.phase!=='active')throw new SessionChangedError()
-  const controller=new AbortController()
-  const guard=()=>{if(!authSession.current(ticket))throw new SessionChangedError()}
-  const unsubscribe=authSession.subscribe(()=>{if(!authSession.current(ticket))controller.abort()})
-  const timeout=path==='/auth/logout'?setTimeout(()=>controller.abort(),12000):undefined
-  function unauthorized(){if(!publicAuth&&authSession.current(ticket))authSession.invalidate(ticket)}
-  try {
-  const headers:Record<string,string> = {}
-  if (body !== undefined) headers['Content-Type']='application/json'
-  if (method !== 'GET') {
-    guard()
-    const r = await fetch('/api/v1/auth/csrf',{credentials:'same-origin',signal:controller.signal})
-    guard()
-    if(r.status===401)unauthorized()
-    if (!r.ok) throw new Error('无法连接服务，请稍后重试')
-    const data:components['schemas']['CsrfOut'] = await r.json()
-    guard()
-    headers['X-CSRF-Token']=data.csrf_token
-  }
-  guard()
-  const response = await fetch('/api/v1'+path,{method,headers,credentials:'same-origin',signal:controller.signal,body:body === undefined ? undefined : JSON.stringify(body)})
-  guard()
-  if (response.status===204) return undefined as T
-  const data=await response.json()
-  guard()
-  if(response.status===401)unauthorized()
-  if (!response.ok) throw new ApiError(response.status,data.code,data.message,data.request_id)
-  return data as T
-  } catch(error) {
-    guard()
-    throw error
-  } finally {unsubscribe();clearTimeout(timeout)}
+export async function authContext(){
+  const before=authSession.ticket()
+  await initializeTabSession()
+  if(!authSession.current(before)&&authSession.snapshot().phase!=='anonymous')throw new SessionChangedError()
+  const session=readSession(),ticket=authSession.ticket()
+  if(!session){authSession.invalidate(ticket);throw new ApiError(401,'login_required','请先登录','')}
+  const check=()=>{if(!authSession.current(ticket))throw new SessionChangedError()}
+  check()
+  return {session,ticket,headers:sessionHeaders(session),check}
 }
-export const date = (s:string) => new Date(s).toLocaleString('zh-CN',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})
+export function rejectExpiredSession(response:Pick<Response,'status'>,session:TabSession|null){if(response.status===401&&session)clearSession(session.session_token)}
+async function sendAuthorized(path:string,init:RequestInit,context:Awaited<ReturnType<typeof authContext>>){
+  const controller=new AbortController(),external=init.signal
+  const unsubscribe=authSession.subscribe(()=>{if(!authSession.current(context.ticket))controller.abort()})
+  const signal=external?AbortSignal.any([external,controller.signal]):controller.signal
+  const timeout=path==='/auth/logout'?setTimeout(()=>controller.abort(),12000):undefined
+  try{
+    context.check()
+    if(context.ticket.phase==='closing'&&path!=='/auth/logout')throw new SessionChangedError()
+    const headers=new Headers(init.headers)
+    for(const [name,value] of Object.entries(context.headers))headers.set(name,value)
+    const response=await fetch('/api/v1'+path,{...init,headers,signal,credentials:'omit',redirect:'error'})
+    try{context.check()}catch(error){void response.body?.cancel().catch(()=>{});throw error}
+    rejectExpiredSession(response,context.session);context.check()
+    return response
+  }catch(error){context.check();throw error}
+  finally{unsubscribe();clearTimeout(timeout)}
+}
+export async function apiResponse(path:string,init:RequestInit={}):Promise<Response>{return sendAuthorized(path,init,await authContext())}
+export async function logoutTab():Promise<string>{
+  const context=await authContext()
+  const response=await sendAuthorized('/auth/logout',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'},context)
+  if(!response.ok){const data=await response.json();context.check();throw new ApiError(response.status,data.code,data.message,data.request_id)}
+  return context.session.session_token
+}
+export async function api<T>(path:string,method='GET',body?:unknown):Promise<T>{
+  const publicAuth=['/auth/tab/login','/auth/tab/register','/auth/tab/password/reset'].includes(path)
+  const headers:Record<string,string>=body===undefined?{}:{'Content-Type':'application/json'}
+  let response:Response,check:()=>void
+  if(publicAuth){
+    await initializeTabSession()
+    const ticket=authSession.ticket(),controller=new AbortController()
+    check=()=>{if(!authSession.current(ticket)||ticket.phase==='closing')throw new SessionChangedError()}
+    check()
+    const probe='ai-notes:storage-probe';window.sessionStorage.setItem(probe,'1');window.sessionStorage.removeItem(probe)
+    headers['X-Notes-Client']='tab'
+    const unsubscribe=authSession.subscribe(()=>{if(!authSession.current(ticket))controller.abort()})
+    try{response=await fetch('/api/v1'+path,{method,headers,credentials:'omit',redirect:'error',signal:controller.signal,body:body===undefined?undefined:JSON.stringify(body)});check()}
+    catch(error){check();throw error}finally{unsubscribe()}
+  }else{
+    const context=await authContext();check=context.check
+    response=await sendAuthorized(path,{method,headers,body:body===undefined?undefined:JSON.stringify(body)},context)
+  }
+  if(response.status===204)return undefined as T
+  const data=await response.json();check()
+  if(!response.ok)throw new ApiError(response.status,data.code,data.message,data.request_id)
+  return data as T
+}
+export async function authenticate(path:'/auth/tab/login'|'/auth/tab/register',body:LoginInput|RegisterInput){
+  await initializeTabSession()
+  const ticket=authSession.ticket()
+  const result=await api<components['schemas']['TabSessionOut']>(path,'POST',body)
+  if(!authSession.current(ticket))throw new SessionChangedError()
+  saveSession({session_token:result.session_token,csrf_token:result.csrf_token})
+  authSession.verify(result.user.id,authSession.ticket())
+  return {user:result.user,ticket:authSession.ticket()}
+}
+export const date=(s:string)=>new Date(s).toLocaleString('zh-CN',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})

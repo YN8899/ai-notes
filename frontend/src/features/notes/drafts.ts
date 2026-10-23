@@ -22,3 +22,4 @@ export function wasNotesOpen(owner:string):boolean{try{return sessionStorage.get
 export function rememberSection(owner:string,section:string){try{sessionStorage.setItem(prefix+owner+':section',section)}catch{/* Navigation still works when browser storage is unavailable. */}}
 
 export function wasChatOpen(owner:string):boolean{try{return sessionStorage.getItem(prefix+owner+':section')==='chat'}catch{return false}}
+export function clearTabNavigation(owner:string){let cleared=true;for(const key of [prefix+owner+':selected-note',prefix+owner+':section','ai-notes:chat:'+owner]){try{sessionStorage.removeItem(key)}catch{cleared=false}}return cleared}

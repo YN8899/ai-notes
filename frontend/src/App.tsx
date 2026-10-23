@@ -1,10 +1,11 @@
 import { lazy, Suspense, useEffect, useState, useSyncExternalStore, type FormEvent, type ReactNode } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { BookOpen, ArrowUpRight, LayoutDashboard, Ticket, Users, ShieldCheck, Activity, LogOut, Bell, RefreshCw, Check, ChevronRight, KeyRound, Copy, MessageSquare } from 'lucide-react'
-import { api, date, ApiError, type User, type Invite, type CreatedInvite, type Job, type Notice, type Audit, type LoginInput, type RegisterInput, type ResetInput } from './api'
+import { api, authenticate, logoutTab, date, ApiError, type User, type Invite, type CreatedInvite, type Job, type Notice, type Audit, type LoginInput, type RegisterInput, type ResetInput } from './api'
 
-import { clearUserDrafts,rememberSection,rememberNote,wasNotesOpen,wasChatOpen } from './features/notes/drafts'
-import { authSession,startSessionSync } from './session.ts'
+import { clearTabNavigation,rememberSection,rememberNote,wasNotesOpen,wasChatOpen } from './features/notes/drafts'
+import { authSession,clearSession,startSessionSync } from './session.ts'
+import { createUuid } from './uuid'
 const NotesWorkspace=lazy(()=>import('./features/notes/NotesWorkspace'))
 const AiChat=lazy(()=>import('./features/ai/AiChat'))
 const AiSettings=lazy(()=>import('./features/ai/AiSettings'))
@@ -23,9 +24,10 @@ function AuthScreen({notice,error}:{notice?:string;error?:unknown}) {
   const mutation=useMutation({mutationFn:async(form:HTMLFormElement)=>{
     const ticket=authSession.ticket(),submittedMode=mode
     const data=Object.fromEntries(new FormData(form))
-    const value=submittedMode==='reset'?await api('/auth/password/reset','POST',data as ResetInput):await api<User>(submittedMode==='login'?'/auth/login':'/auth/register','POST',data as LoginInput|RegisterInput)
-    return {ticket,mode:submittedMode,value}
-  },onSuccess:result=>{if(!authSession.current(result.ticket))return;if(result.mode==='reset'){setMode('login');mutation.reset()}else{const session=authSession.login((result.value as User).id,result.ticket);client.setQueryData(['me',session.generation],result.value)}}})
+    if(submittedMode==='reset'){const value=await api('/auth/tab/password/reset','POST',data as ResetInput);return {ticket,mode:submittedMode,value}}
+    const result=await authenticate(submittedMode==='login'?'/auth/tab/login':'/auth/tab/register',data as LoginInput|RegisterInput)
+    return {ticket:result.ticket,mode:submittedMode,value:result.user}
+  },onSuccess:result=>{if(!authSession.current(result.ticket))return;if(result.mode==='reset'){setMode('login');mutation.reset()}else{const session=authSession.ticket();client.setQueryData(['me',session.generation],result.value)}}})
   function submit(e:FormEvent<HTMLFormElement>){e.preventDefault();mutation.mutate(e.currentTarget)}
   const title=mode==='login'?'欢迎回到知页':mode==='register'?'开始你的学习空间':'恢复账户访问'
   return <main className="auth-layout">
@@ -40,7 +42,7 @@ function AuthScreen({notice,error}:{notice?:string;error?:unknown}) {
         <ErrorMessage error={mutation.error}/><button className="primary full" disabled={mutation.isPending}>{mutation.isPending?'正在处理…':mode==='login'?'登录学习空间':mode==='register'?'创建账户':'重置密码'}<ArrowUpRight size={18}/></button>
       </form>
       <div className="auth-links">{(['login','register','reset'] as const).filter(x=>x!==mode).map(x=><button className="text-button" key={x} onClick={()=>{setMode(x);mutation.reset()}}>{x==='login'?'返回登录':x==='register'?'使用邀请码注册':'忘记密码'}</button>)}</div>
-      <p className="auth-note">当前已开放笔记与 AI 文字 / PDF 对话。使用邀请码加入学习空间。</p>
+      <p className="auth-note">登录仅对当前标签页生效，刷新保留登录。新开标签页可登录其他账号。</p>
     </section>
   </main>
 }
@@ -70,7 +72,7 @@ function UsersPanel() {
 function JobsPanel({admin}:{admin:boolean}) {
   const client=useQueryClient()
   const query=useQuery({queryKey:['jobs',admin],queryFn:()=>api<Job[]>(admin?'/admin/jobs':'/jobs'),refetchInterval:3000})
-  const create=useMutation({mutationFn:()=>api<Job>('/jobs/diagnostic','POST',{request_key:crypto.randomUUID(),duration_seconds:3}),onSuccess:()=>client.invalidateQueries({queryKey:['jobs']})})
+  const create=useMutation({mutationFn:()=>api<Job>('/jobs/diagnostic','POST',{request_key:createUuid(),duration_seconds:3}),onSuccess:()=>client.invalidateQueries({queryKey:['jobs']})})
   const retry=useMutation({mutationFn:(id:string)=>api('/admin/jobs/'+id+'/retry','POST',{}),onSuccess:()=>client.invalidateQueries({queryKey:['jobs']})})
   return <div className="panel"><div className="panel-heading"><div><h3>后台任务</h3><p className="muted">自检任务用于验证后台处理。页面会自动更新任务状态。</p></div><button className="primary" disabled={create.isPending} onClick={()=>create.mutate()}>运行自检 <Activity size={16}/></button></div><ErrorMessage error={query.error||create.error||retry.error}/>{query.data?.length?<div className="table-wrap"><table><thead><tr><th>任务</th><th>状态</th><th>尝试次数</th><th>创建时间</th><th>结果</th></tr></thead><tbody>{query.data.map(j=><tr key={j.id}><td>{j.kind==='pdf.import'?'PDF 导入':j.kind==='image.process'?'图片处理':'后台自检'}<small>{j.id.slice(0,8)}</small></td><td><Status value={j.status}/></td><td>{j.attempts} / {j.max_attempts}</td><td>{date(j.created_at)}</td><td>{j.status==='failed'&&admin?<button className="text-button" disabled={retry.isPending} onClick={()=>retry.mutate(j.id)}>重新执行</button>:j.status==='succeeded'?(j.kind==='pdf.import'?(j.result?.accepted?'已转换 '+j.result.pages+' 页':'未完整转换，请在笔记中查看原因'):'正常'):j.error_code||'—'}</td></tr>)}</tbody></table></div>:<Empty>暂无任务。运行一次自检，检查后台是否正常工作。</Empty>}</div>
 }
@@ -105,7 +107,7 @@ export default function App() {
       if(next.generation===old.generation)return
       // Abort/remove old queries before any delayed response can repopulate a private screen.
       void client.cancelQueries();client.clear()
-      if(old.owner&&(next.phase==='closing'||next.phase==='anonymous'||next.owner!==old.owner)&&!clearUserDrafts(old.owner))setStorageNotice('界面已锁定，但浏览器未允许清理本机草稿。请清理本站点的浏览器数据。')
+      if(old.owner&&(next.phase==='closing'||next.phase==='anonymous'||next.owner!==old.owner)&&!clearTabNavigation(old.owner))setStorageNotice('界面已锁定，但浏览器未允许清理当前标签页记录。')
       setNoteToOpen('');setSection('home')
     })
     const stop=startSessionSync(()=>{void client.invalidateQueries({queryKey:['me']})})
@@ -114,7 +116,7 @@ export default function App() {
   const me=useQuery({queryKey:['me',session.generation],queryFn:async()=>{const ticket=authSession.ticket();const user=await api<User>('/auth/me');authSession.verify(user.id,ticket);return user},enabled:session.phase==='checking'||session.phase==='active'})
   useEffect(()=>{if(me.data?.id){if(wasNotesOpen(me.data.id))setSection('notes');else if(wasChatOpen(me.data.id))setSection('chat')}},[me.data?.id])
   function go(next:Section){if(me.data)rememberSection(me.data.id,next);setNoteToOpen('');setSection(next)}
-  const logout=useMutation({mutationFn:async()=>{const closing=authSession.beginLogout(authSession.ticket());try{await api('/auth/logout','POST',{})}finally{authSession.invalidate(closing)}}})
+  const logout=useMutation({mutationFn:async()=>{const closing=authSession.beginLogout(authSession.ticket());try{await logoutTab()}finally{if(authSession.current(closing))clearSession()}}})
   if(session.phase==='closing')return <div className="loading">正在退出登录，已暂停本机编辑…</div>
   if(session.phase==='anonymous')return <AuthScreen notice={storageNotice} error={logout.error}/>
   if(me.isPending) return <div className="loading">正在连接你的学习空间…</div>

@@ -1,68 +1,69 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { ApiError } from '../src/api.ts'
+import {signIn,tick} from './tab-environment.mjs'
+import {readSession} from '../src/session.ts'
 import { authSession } from '../src/session.ts'
 import { fetchExportArchive, startArchiveDownload, MAX_ARCHIVE_BYTES } from '../src/features/exports/download.ts'
 
 const owner = 'synthetic-export-owner'
-const csrf = () => new Response(JSON.stringify({ csrf_token: 'synthetic-csrf' }))
 const archiveResponse = (body = 'PK synthetic ZIP', headers = {}) => new Response(body, { headers: {
   'Content-Type': 'application/zip', 'Content-Disposition': 'attachment; filename="ai-notes-export-20261020T123456Z.zip"', ...headers,
 } })
 function environment() {
   const previous = { fetch: globalThis.fetch, document: globalThis.document, create: URL.createObjectURL, revoke: URL.revokeObjectURL }
-  authSession.invalidate(authSession.ticket())
-  authSession.login(owner, authSession.ticket())
+  signIn(owner,'a')
   return { restore() { globalThis.fetch = previous.fetch; globalThis.document = previous.document; URL.createObjectURL = previous.create; URL.revokeObjectURL = previous.revoke } }
 }
-const tick = () => new Promise(resolve => setImmediate(resolve))
 
-test('complete export uses CSRF and authenticated POST, receives bounded chunks and a safe filename', async () => {
+test('complete export uses tab Bearer and CSRF in one authenticated POST, receives bounded chunks and a safe filename', async () => {
   const env = environment(), requests = [], progress = [], chunks = [new Uint8Array([80, 75]), new Uint8Array([3, 4, 5])]
   globalThis.fetch = async (url, options) => {
     requests.push({ url, options })
-    return requests.length === 1 ? csrf() : archiveResponse(new ReadableStream({ start(stream) { for (const chunk of chunks) stream.enqueue(chunk); stream.close() } }), { 'Content-Length': '5' })
+    return archiveResponse(new ReadableStream({ start(stream) { for (const chunk of chunks) stream.enqueue(chunk); stream.close() } }), { 'Content-Length': '5' })
   }
   try {
     const result = await fetchExportArchive(owner, new AbortController().signal, value => progress.push(value))
-    assert.deepEqual(requests.map(item => item.url), ['/api/v1/auth/csrf', '/api/v1/exports/archive'])
-    assert.equal(requests[1].options.method, 'POST'); assert.equal(requests[1].options.credentials, 'same-origin')
-    assert.equal(requests[1].options.headers['X-CSRF-Token'], 'synthetic-csrf'); assert.equal(requests[1].options.body, '{}')
+    assert.deepEqual(requests.map(item => item.url), ['/api/v1/exports/archive'])
+    assert.equal(requests[0].options.method, 'POST'); assert.equal(requests[0].options.credentials, 'omit')
+    assert.equal(requests[0].options.headers['X-CSRF-Token'], readSession().csrf_token); assert.equal(requests[0].options.body, '{}')
     assert.equal(result.filename, 'ai-notes-export-20261020T123456Z.zip')
     assert.deepEqual([...new Uint8Array(await result.blob.arrayBuffer())], [80, 75, 3, 4, 5])
     assert.deepEqual(progress.at(-1), { phase: 'downloading', received: 5, total: 5 })
-    assert.equal(requests[1].options.signal.aborted, true)
+    assert.equal(requests[0].options.signal.aborted, true)
   } finally { env.restore() }
 })
 
-test('export awaiting CSRF never sends its POST under a later account cookie', async () => {
+test('export discards late headers after a tab account replacement', async () => {
   const env = environment(); let resolve, count = 0, requestSignal
   globalThis.fetch = (_url, options) => { count++; requestSignal = options.signal; return new Promise(yes => { resolve = yes }) }
   try {
     const pending = fetchExportArchive(owner, new AbortController().signal)
+    await tick()
     authSession.invalidate(authSession.ticket()); authSession.login('new-export-owner', authSession.ticket())
     assert.equal(requestSignal.aborted, true)
-    resolve(csrf())
+    resolve(archiveResponse())
     await assert.rejects(pending, { name: 'AbortError' }); assert.equal(count, 1)
   } finally { env.restore() }
 })
 
-test('cancelling an export aborts transport and prevents a late CSRF response from starting it', async () => {
+test('cancelling an export aborts transport and discards late export headers', async () => {
   const env = environment(), controller = new AbortController(); let resolve, count = 0, requestSignal
   globalThis.fetch = (_url, options) => { count++; requestSignal = options.signal; return new Promise(yes => { resolve = yes }) }
   try {
     const pending = fetchExportArchive(owner, controller.signal)
-    controller.abort(); assert.equal(requestSignal.aborted, true); resolve(csrf())
+    await tick()
+    controller.abort(); assert.equal(requestSignal.aborted, true); resolve(archiveResponse())
     await assert.rejects(pending, { name: 'AbortError' }); assert.equal(count, 1)
   } finally { env.restore() }
 })
 
 test('logout during stream reception rejects late chunks, cancels the reader and stops progress', async () => {
   const env = environment(), progress = []; let resolve, cancelled = false, released = false, reads = 0, count = 0
-  globalThis.fetch = async () => ++count === 1 ? csrf() : {
+  globalThis.fetch = async () => ({
     ok: true, headers: new Headers({ 'Content-Type': 'application/zip' }),
     body: { getReader: () => ({ read: () => { reads++; return new Promise(yes => { resolve = yes }) }, cancel: async () => { cancelled = true }, releaseLock: () => { released = true } }) },
-  }
+  })
   try {
     const pending = fetchExportArchive(owner, new AbortController().signal, value => progress.push(value))
     for (let i = 0; i < 20 && !reads; i++) await tick()
@@ -77,7 +78,7 @@ test('logout during stream reception rejects late chunks, cancels the reader and
 
 test('server export errors preserve their request ID and message', async () => {
   const env = environment(); let count = 0
-  globalThis.fetch = async () => ++count === 1 ? csrf() : new Response(JSON.stringify({ code: 'export_busy', message: '已有导出正在生成，请稍后重试。', request_id: 'synthetic-request-id' }), { status: 409 })
+  globalThis.fetch = async () => new Response(JSON.stringify({ code: 'export_busy', message: '已有导出正在生成，请稍后重试。', request_id: 'synthetic-request-id' }), { status: 409 })
   try {
     await assert.rejects(fetchExportArchive(owner, new AbortController().signal), failure => {
       assert.ok(failure instanceof ApiError); assert.equal(failure.code, 'export_busy'); assert.equal(failure.status, 409)
@@ -89,7 +90,7 @@ test('server export errors preserve their request ID and message', async () => {
 
 test('a current unauthorized export locks its session', async () => {
   const env = environment(); let count = 0
-  globalThis.fetch = async () => ++count === 1 ? csrf() : new Response(JSON.stringify({ code: 'unauthorized', message: '登录已过期。' }), { status: 401 })
+  globalThis.fetch = async () => new Response(JSON.stringify({ code: 'unauthorized', message: '登录已过期。' }), { status: 401 })
   try {
     await assert.rejects(fetchExportArchive(owner, new AbortController().signal), { name: 'AbortError' })
     assert.equal(authSession.snapshot().phase, 'anonymous')
@@ -98,7 +99,7 @@ test('a current unauthorized export locks its session', async () => {
 
 test('a late unauthorized export cannot sign out a subsequent account', async () => {
   const env = environment(); let count = 0, resolve
-  globalThis.fetch = async () => ++count === 1 ? csrf() : new Promise(yes => { resolve = yes })
+  globalThis.fetch = async () => new Promise(yes => { resolve = yes })
   try {
     const pending = fetchExportArchive(owner, new AbortController().signal)
     for (let i = 0; i < 20 && !resolve; i++) await tick()
@@ -112,10 +113,10 @@ test('a late unauthorized export cannot sign out a subsequent account', async ()
 
 test('oversized Content-Length is rejected before reading and cancels the response', async () => {
   const env = environment(); let count = 0, read = false, cancelled = false
-  globalThis.fetch = async () => ++count === 1 ? csrf() : {
+  globalThis.fetch = async () => ({
     ok: true, headers: new Headers({ 'Content-Type': 'application/zip', 'Content-Length': String(MAX_ARCHIVE_BYTES + 1) }),
     body: { cancel: async () => { cancelled = true }, getReader: () => { read = true; throw new Error('should not read') } },
-  }
+  })
   try {
     await assert.rejects(fetchExportArchive(owner, new AbortController().signal), /超过上限/)
     assert.equal(read, false); assert.equal(cancelled, true)
@@ -124,10 +125,10 @@ test('oversized Content-Length is rejected before reading and cancels the respon
 
 test('chunked responses have the same limit even without Content-Length', async () => {
   const env = environment(); let count = 0, cancelled = false
-  globalThis.fetch = async () => ++count === 1 ? csrf() : {
+  globalThis.fetch = async () => ({
     ok: true, headers: new Headers({ 'Content-Type': 'application/zip' }),
     body: { getReader: () => ({ read: async () => ({ done: false, value: { byteLength: MAX_ARCHIVE_BYTES + 1 } }), cancel: async () => { cancelled = true }, releaseLock() {} }) },
-  }
+  })
   try {
     await assert.rejects(fetchExportArchive(owner, new AbortController().signal), /已停止接收/)
     assert.equal(cancelled, true)
@@ -137,17 +138,17 @@ test('chunked responses have the same limit even without Content-Length', async 
 test('non-ZIP or incomplete responses cannot be handed to the browser', async () => {
   const env = environment(); let count = 0
   try {
-    globalThis.fetch = async () => ++count === 1 ? csrf() : new Response('<html>error</html>', { headers: { 'Content-Type': 'text/html' } })
+    globalThis.fetch = async () => new Response('<html>error</html>', { headers: { 'Content-Type': 'text/html' } })
     await assert.rejects(fetchExportArchive(owner, new AbortController().signal), /未返回 ZIP/)
     count = 0
-    globalThis.fetch = async () => ++count === 1 ? csrf() : archiveResponse('PK', { 'Content-Length': '3' })
+    globalThis.fetch = async () => archiveResponse('PK', { 'Content-Length': '3' })
     await assert.rejects(fetchExportArchive(owner, new AbortController().signal), /接收不完整/)
   } finally { env.restore() }
 })
 
 test('an unsafe server filename falls back to the fixed archive name', async () => {
   const env = environment(); let count = 0
-  globalThis.fetch = async () => ++count === 1 ? csrf() : archiveResponse('PK', { 'Content-Disposition': 'attachment; filename="../../private.zip"' })
+  globalThis.fetch = async () => archiveResponse('PK', { 'Content-Disposition': 'attachment; filename="../../private.zip"' })
   try { assert.equal((await fetchExportArchive(owner, new AbortController().signal)).filename, 'ai-notes-export.zip') }
   finally { env.restore() }
 })

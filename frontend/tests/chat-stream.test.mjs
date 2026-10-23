@@ -2,6 +2,8 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { readStream } from '../src/features/ai/chat-stream.ts'
 import { authSession } from '../src/session.ts'
+import {signIn,tick} from './tab-environment.mjs'
+signIn('stream-owner','s')
 
 test('SSE parsing preserves split UTF-8, split CRLF, comments and multiple events',async()=>{
   const original=globalThis.fetch, requests=[]
@@ -16,6 +18,7 @@ test('SSE parsing preserves split UTF-8, split CRLF, comments and multiple event
     assert.deepEqual(received,[{name:'meta',data:{answer:'首🙂'}},{name:'delta',data:{offset:2,text:'尾'}},{name:'done',data:{status:'succeeded'}}])
     assert.equal(requests.length,1)
     assert.equal(requests[0].url,'/api/v1/ai/runs/existing-run/events')
+    assert.equal(requests[0].options.credentials,'omit');assert.equal(requests[0].options.headers.get('Authorization'),'Bearer '+'s'.repeat(43))
     assert.equal(requests[0].options.method,undefined) // Read-only GET; no generation on reconnect.
   }finally{globalThis.fetch=original}
 })
@@ -66,14 +69,16 @@ test('an unfinished event larger than the limit is rejected after delivering pre
 
 test('late stream headers from a previous session are cancelled without delivering private events',async()=>{
   const original=globalThis.fetch,received=[];let resolve,cancelled=false
-  authSession.login('stream-old-owner',authSession.ticket())
+  signIn('stream-old-owner')
   globalThis.fetch=()=>new Promise(yes=>{resolve=yes})
   try{
     const pending=readStream('old-run',new AbortController().signal,(name,data)=>received.push({name,data}))
+    const rejected=assert.rejects(pending,{name:'AbortError'})
+    await tick()
     authSession.invalidate(authSession.ticket())
-    authSession.login('stream-new-owner',authSession.ticket())
+    signIn('stream-new-owner')
     resolve(new Response(new ReadableStream({cancel(){cancelled=true}})))
-    await assert.rejects(pending,{name:'AbortError'})
+    await rejected
     assert.deepEqual(received,[]);assert.equal(cancelled,true)
   }finally{globalThis.fetch=original}
 })
@@ -81,11 +86,11 @@ test('late stream headers from a previous session are cancelled without deliveri
 test('logout while reading a stream rejects buffered events and releases the reader',async()=>{
   const original=globalThis.fetch,received=[];let streamController,first,cancelled=false
   const firstEvent=new Promise(resolve=>{first=resolve})
-  authSession.login('stream-reading-owner',authSession.ticket())
+  signIn('stream-reading-owner')
   globalThis.fetch=async()=>new Response(new ReadableStream({start(controller){streamController=controller},cancel(){cancelled=true}}))
   try{
     const pending=readStream('old-run',new AbortController().signal,(name,data)=>{received.push({name,data});first()})
-    await Promise.resolve()
+    await tick()
     streamController.enqueue(new TextEncoder().encode('event: meta\ndata: {"answer":"已接收"}\n\n'))
     await firstEvent
     authSession.invalidate(authSession.ticket())

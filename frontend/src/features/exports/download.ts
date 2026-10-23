@@ -1,4 +1,4 @@
-import { ApiError } from '../../api.ts'
+import { ApiError,authContext,rejectExpiredSession } from '../../api.ts'
 import { authSession, SessionChangedError } from '../../session.ts'
 import type { SessionTicket } from '../../session.ts'
 
@@ -77,31 +77,17 @@ export async function fetchExportArchive(owner: string, signal: AbortSignal, pro
   const timeout = setTimeout(() => { timedOut = true; controller.abort() }, REQUEST_TIMEOUT_MS)
   try {
     progress({ phase: 'preparing', received: 0 })
-    const csrfResponse = await fetch('/api/v1/auth/csrf', { credentials: 'same-origin', signal: controller.signal })
-    check()
-    if (!csrfResponse.ok) {
-      const failure = await errorResponse(csrfResponse, check)
-      check()
-      if (csrfResponse.status === 401) authSession.invalidate(ticket)
-      throw failure
-    }
-    const csrfBody = await readBody(csrfResponse, MAX_JSON_BYTES, check)
-    check()
-    const csrfText = await csrfBody.text()
-    check()
-    let token: unknown
-    try { token = JSON.parse(csrfText).csrf_token } catch { /* Report a readable authorization error below. */ }
-    if (typeof token !== 'string' || !token) throw new Error('无法获取导出授权，请重试。')
+    const context=await authContext()
     check()
     const response = await fetch('/api/v1/exports/archive', {
-      method: 'POST', credentials: 'same-origin', signal: controller.signal,
-      headers: { 'X-CSRF-Token': token, 'Content-Type': 'application/json' }, body: '{}',
+      method: 'POST', credentials: 'omit', redirect:'error', signal: controller.signal,
+      headers: { ...context.headers, 'Content-Type': 'application/json' }, body: '{}',
     })
     check()
     if (!response.ok) {
       const failure = await errorResponse(response, check)
       check()
-      if (response.status === 401) authSession.invalidate(ticket)
+      rejectExpiredSession(response,context.session)
       throw failure
     }
     if (response.headers.get('Content-Type')?.split(';')[0].trim().toLowerCase() !== 'application/zip') {

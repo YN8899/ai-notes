@@ -1,10 +1,13 @@
+import { createUuid } from '../../uuid'
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '../../api'
 import { NoteError } from '../notes/NoteError'
 import type { Note } from '../notes/types'
 import { sendContent } from './upload'
-import type { PdfImportOut, TicketOut } from './types'
+import { readPrivateFile } from './download'
+import { authSession,SessionChangedError } from '../../session.ts'
+import type { PdfImportOut } from './types'
 import './files.css'
 
 const labels: Record<string, string> = {
@@ -45,7 +48,7 @@ async function transfer(item: PdfImportOut, file: File, progress: (percent: numb
 export function PdfImportForm({ notebookId, tagIds, onOpen }: { notebookId: string; tagIds: string[]; onOpen: (id: string) => void }) {
   const [file, setFile] = useState<File | null>(null), [item, setItem] = useState<PdfImportOut | null>(null)
   const [busy, setBusy] = useState(false), [progress, setProgress] = useState(0), [error, setError] = useState<unknown>(null)
-  const requestKey = useRef(crypto.randomUUID()), controller = useRef<AbortController | null>(null), alive = useRef(true)
+  const requestKey = useRef(createUuid()), controller = useRef<AbortController | null>(null), alive = useRef(true)
   useEffect(() => { alive.current = true; return () => { alive.current = false; controller.current?.abort() } }, [])
   async function submit(event: FormEvent) {
     event.preventDefault()
@@ -70,7 +73,7 @@ export function PdfImportForm({ notebookId, tagIds, onOpen }: { notebookId: stri
     <p className="muted">一本 PDF 创建一篇多页图片笔记，保留原件并按页序转换。单份最多 50 MiB、200 页，后台处理期间可以离开页面。</p>
     <form onSubmit={event => void submit(event)}>
       <label>选择 PDF 文件<input type="file" accept="application/pdf,.pdf" disabled={busy} onChange={event => {
-        setFile(event.target.files?.[0] || null); setItem(null); setError(null); requestKey.current = crypto.randomUUID()
+        setFile(event.target.files?.[0] || null); setItem(null); setError(null); requestKey.current = createUuid()
       }}/></label>
       {busy ? <p role="status">上传 PDF：{progress}%</p> : null}
       <NoteError error={error}/>
@@ -117,10 +120,12 @@ export function PdfImportStatus({ noteId, owner, onBusyChange, onNoteChanged }: 
   async function download() {
     if (!item) return
     await act(async () => {
-      const ticket = await api<TicketOut>('/files/' + item.upload.file.id + '/ticket?kind=original', 'POST', {})
-      const target = new URL(ticket.url, window.location.origin)
-      if (target.origin !== window.location.origin || target.pathname !== '/api/v1/files/' + item.upload.file.id + '/content') throw new Error('下载地址不符合私有访问规则')
-      const link = document.createElement('a'); link.href = target.pathname + target.search; link.download = item.filename; link.click()
+      const ticket=authSession.ticket();controller.current=new AbortController()
+      const blob=await readPrivateFile(item.upload.file.id,'original',controller.current.signal)
+      if(!alive.current||!authSession.current(ticket,owner))throw new SessionChangedError()
+      const url=URL.createObjectURL(blob),link=document.createElement('a')
+      try{link.href=url;link.download=item.filename;link.click()}
+      finally{setTimeout(()=>URL.revokeObjectURL(url),1000)}
     })
   }
   if (!item) return query.error ? <NoteError error={query.error}/> : null

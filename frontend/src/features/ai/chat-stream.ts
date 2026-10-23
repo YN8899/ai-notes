@@ -1,5 +1,6 @@
 import type { components } from '../../api.generated'
 import { authSession, SessionChangedError } from '../../session.ts'
+import { apiResponse } from '../../api.ts'
 
 export type Run = components['schemas']['RunOut']
 export type Conversation = components['schemas']['ConversationOut']
@@ -11,7 +12,7 @@ export async function readStream(id:string, signal:AbortSignal, receive:(name:st
   const ticket=authSession.ticket()
   const check=()=>{signal.throwIfAborted();if(!authSession.current(ticket))throw new SessionChangedError()}
   check()
-  const response = await fetch(`/api/v1/ai/runs/${id}/events`, {credentials:'same-origin', signal})
+  const response = await apiResponse(`/ai/runs/${id}/events`, {signal})
   try{check()}catch(error){await response.body?.cancel().catch(()=>{});throw error}
   if (!response.ok) {
     const error = await response.json()
