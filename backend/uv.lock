@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.12"
 resolution-markers = [
     "python_full_version >= '3.14'",
@@ -15,6 +15,7 @@ dependencies = [
     { name = "alibabacloud-oss-v2" },
     { name = "argon2-cffi" },
     { name = "fastapi" },
+    { name = "httpx" },
     { name = "pillow" },
     { name = "psycopg", extra = ["binary"] },
     { name = "pydantic-settings" },
@@ -24,7 +25,6 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
-    { name = "httpx" },
     { name = "pytest" },
 ]
 
@@ -34,6 +34,7 @@ requires-dist = [
     { name = "alibabacloud-oss-v2", specifier = "==1.4.0" },
     { name = "argon2-cffi", specifier = "==25.1.0" },
     { name = "fastapi", specifier = "==0.143.0" },
+    { name = "httpx", specifier = "==0.28.1" },
     { name = "pillow", specifier = "==12.3.0" },
     { name = "psycopg", extras = ["binary"], specifier = "==3.3.6" },
     { name = "pydantic-settings", specifier = "==2.15.0" },
@@ -42,10 +43,7 @@ requires-dist = [
 ]
 
 [package.metadata.requires-dev]
-dev = [
-    { name = "httpx", specifier = "==0.28.1" },
-    { name = "pytest", specifier = "==8.3.5" },
-]
+dev = [{ name = "pytest", specifier = "==8.3.5" }]
 
 [[package]]
 name = "alembic"

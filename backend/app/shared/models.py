@@ -111,3 +111,4 @@ class Notification(Entity, Base):
 # Register modular note tables for Alembic and shared metadata discovery.
 from app.modules.notes import models as notes_models  # noqa: E402,F401
 from app.modules.files import models as files_models  # noqa: E402,F401
+from app.modules.ai import models as ai_models  # noqa: E402,F401

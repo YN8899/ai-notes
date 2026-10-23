@@ -2,7 +2,7 @@ from functools import lru_cache
 from typing import Literal
 import re
 from urllib.parse import urlsplit
-from pydantic import SecretStr, model_validator
+from pydantic import SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -34,6 +34,15 @@ class Settings(BaseSettings):
     oss_access_key_id: SecretStr = SecretStr("")
     oss_access_key_secret: SecretStr = SecretStr("")
     oss_security_token: SecretStr = SecretStr("")
+    deepseek_api_key: SecretStr = SecretStr("")
+
+    @field_validator("deepseek_api_key")
+    @classmethod
+    def validate_deepseek_api_key(cls, value):
+        raw = value.get_secret_value()
+        if raw and (not 16 <= len(raw) <= 512 or any(ord(character) < 33 or ord(character) > 126 for character in raw)):
+            raise ValueError("DeepSeek API Key must contain 16 to 512 visible ASCII characters")
+        return value
 
     @model_validator(mode="after")
     def validate_production(self):

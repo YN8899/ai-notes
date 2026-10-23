@@ -6156,10 +6156,354 @@
           }
         }
       }
+    },
+    "/api/v1/ai/providers": {
+      "get": {
+        "tags": [
+          "ai"
+        ],
+        "summary": "Provider Catalog",
+        "operationId": "provider_catalog_api_v1_ai_providers_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiCatalogOut"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable Content",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/ai/connection-test": {
+      "post": {
+        "tags": [
+          "ai"
+        ],
+        "summary": "Test Connection",
+        "operationId": "test_connection_api_v1_ai_connection_test_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiConnectionOut"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable Content",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
     "schemas": {
+      "AiCatalogOut": {
+        "properties": {
+          "credential_source": {
+            "type": "string",
+            "const": "shared",
+            "title": "Credential Source",
+            "default": "shared"
+          },
+          "platform_enabled": {
+            "type": "boolean",
+            "title": "Platform Enabled"
+          },
+          "providers": {
+            "items": {
+              "$ref": "#/components/schemas/AiProviderOut"
+            },
+            "type": "array",
+            "title": "Providers"
+          }
+        },
+        "type": "object",
+        "required": [
+          "platform_enabled",
+          "providers"
+        ],
+        "title": "AiCatalogOut"
+      },
+      "AiConnectionOut": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "valid",
+              "invalid",
+              "unavailable"
+            ],
+            "title": "Status"
+          },
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "available_models": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Available Models"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "code",
+          "available_models"
+        ],
+        "title": "AiConnectionOut"
+      },
+      "AiModelOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "supports_text": {
+            "type": "boolean",
+            "title": "Supports Text"
+          },
+          "supports_vision": {
+            "type": "boolean",
+            "title": "Supports Vision"
+          },
+          "supports_streaming": {
+            "type": "boolean",
+            "title": "Supports Streaming"
+          },
+          "supports_embedding": {
+            "type": "boolean",
+            "title": "Supports Embedding"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "supports_text",
+          "supports_vision",
+          "supports_streaming",
+          "supports_embedding"
+        ],
+        "title": "AiModelOut"
+      },
+      "AiProviderOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "models": {
+            "items": {
+              "$ref": "#/components/schemas/AiModelOut"
+            },
+            "type": "array",
+            "title": "Models"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "models"
+        ],
+        "title": "AiProviderOut"
+      },
       "AuditOut": {
         "properties": {
           "id": {
