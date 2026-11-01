@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 import unittest
+from unittest.mock import patch
 
 from app.main import app
 
@@ -28,3 +29,13 @@ class OpenAPIContractTests(unittest.TestCase):
             if "413" in operation.get("responses", {})
         }
         self.assertEqual(descriptions, {"Content Too Large"})
+
+    def test_size_response_description_with_legacy_http_phrase(self):
+        # Exercise Python 3.12's phrase even when running under newer Python.
+        previous = app.openapi_schema
+        try:
+            app.openapi_schema = None
+            with patch.dict("http.client.responses", {413: "Request Entity Too Large"}):
+                self.test_export_size_response_description_is_stable_across_python_versions()
+        finally:
+            app.openapi_schema = previous

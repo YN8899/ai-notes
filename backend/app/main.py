@@ -112,7 +112,7 @@ app.include_router(exports_router, prefix="/api/v1", responses={
 })
 app.include_router(ocr_router, prefix="/api/v1", responses={**errors, 503: {"model": ErrorOut}})
 app.include_router(keyword_router, prefix="/api/v1", responses=errors)
-app.include_router(semantic_router, prefix="/api/v1", responses={**errors, 413: {"model": ErrorOut}, 503: {"model": ErrorOut}})
+app.include_router(semantic_router, prefix="/api/v1", responses={**errors, 413: {"model": ErrorOut, "description": "Content Too Large"}, 503: {"model": ErrorOut}})
 app.include_router(cards_router, prefix="/api/v1", responses={**errors, 503: {"model": ErrorOut}})
 
 from app.modules.learning.quiz_router import router as quizzes_router

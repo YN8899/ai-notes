@@ -12313,14 +12313,14 @@
             "description": "Internal Server Error"
           },
           "413": {
+            "description": "Content Too Large",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorOut"
                 }
               }
-            },
-            "description": "Content Too Large"
+            }
           },
           "503": {
             "content": {
@@ -12577,14 +12577,14 @@
             "description": "Internal Server Error"
           },
           "413": {
+            "description": "Content Too Large",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorOut"
                 }
               }
-            },
-            "description": "Content Too Large"
+            }
           },
           "503": {
             "content": {
@@ -12710,14 +12710,14 @@
             "description": "Internal Server Error"
           },
           "413": {
+            "description": "Content Too Large",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorOut"
                 }
               }
-            },
-            "description": "Content Too Large"
+            }
           },
           "503": {
             "content": {
