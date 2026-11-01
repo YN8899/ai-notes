@@ -9,6 +9,7 @@ Checksums detect damage, not malicious replacement of both data and its manifest
 import argparse
 from datetime import datetime
 import hashlib
+from itertools import chain
 import json
 import math
 from pathlib import Path
@@ -20,17 +21,42 @@ import zipfile
 
 
 FORMAT = "ai-notes-export"
-VERSION = 1
+VERSION = 3
 MAX_TOTAL_BYTES = 512 * 1024 * 1024
 MAX_METADATA_BYTES = 32 * 1024 * 1024
 MAX_ROWS = 50_000
 MAX_ENTRIES = 50_002
 CHUNK_BYTES = 256 * 1024
-TABLES = (
+V1_TABLES = (
     "folders", "notebooks", "tags", "notes", "note_tags", "note_versions",
     "files", "note_pages", "file_variants", "pdf_imports", "ai_conversations",
     "ai_runs", "ai_steps", "ai_saved_notes",
 )
+V2_TABLES = V1_TABLES + ("ocr_documents",)
+LEARNING_TABLES = ("learning_decks", "card_generations", "learning_cards", "learning_quizzes", "quiz_questions",
+    "quiz_attempts", "quiz_answers", "quiz_operations", "quiz_answer_reviews", "quiz_generations", "quiz_gradings",
+    "review_items", "review_plans", "review_logs", "user_learning_settings", "daily_review_digests", "learning_events")
+LEARNING_COLUMNS = {name:frozenset(('id created_at owner_id '+extra).split()) for name,extra in {
+    'learning_decks':'name status revision updated_at',
+    'card_generations':'deck_id run_id request_key request_hash kind count source status error_code finished_at',
+    'learning_cards':'deck_id kind front back payload source status revision updated_at generation_id generation_ordinal',
+    'learning_quizzes':'title status revision question_count updated_at',
+    'quiz_questions':'quiz_id position kind prompt options correct_answer explanation max_points source',
+    'quiz_attempts':'quiz_id request_key quiz_revision title snapshot status revision total_points max_points submitted_at finished_at',
+    'quiz_answers':'attempt_id question_id answer revision status points feedback provenance',
+    'quiz_operations':'attempt_id request_key request_hash result',
+    'quiz_answer_reviews':'answer_id old_grade new_grade reason request_key',
+    'quiz_generations':'quiz_id run_id request_key request_hash title kinds count source status error_code finished_at',
+    'quiz_gradings':'answer_id answer_revision attempt_revision run_id request_key request_hash input status result error_code finished_at',
+    'review_items':'kind note_id card_id quiz_id',
+    'review_plans':'item_id strategy status next_due_at algorithm_version scheduler_state last_fsrs_state revision updated_at',
+    'review_logs':'item_id plan_id request_key request_hash action rating scheduled_for reviewed_at old_snapshot new_snapshot reason result_plan',
+    'user_learning_settings':'timezone review_time reminder_enabled revision updated_at',
+    'daily_review_digests':'kind local_date timezone counts',
+    'learning_events':'event_id kind note_id card_id quiz_id started_at ended_at request_hash',
+}.items()}
+TABLES = V2_TABLES + LEARNING_TABLES
+TABLES_BY_VERSION = {1: V1_TABLES, 2: V2_TABLES, 3: TABLES}
 OWNED_TABLES = set(TABLES) - {"file_variants", "ai_steps"}
 UUID_TEXT = r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
 ASSET_PATH = re.compile(rf"objects/({UUID_TEXT})/(?:original|variants/{UUID_TEXT})")
@@ -196,7 +222,7 @@ def _references(collections, payloads, owner):
     payload_paths = set(payloads)
     indexed = {}
     rows = 0
-    for table in TABLES:
+    for table in collections:
         items = collections[table]
         _require(isinstance(items, list), "invalid_collection")
         rows += len(items)
@@ -299,7 +325,61 @@ def _references(collections, payloads, owner):
         ref(row, "note_id", "notes")
         ref(row, "run_id", "ai_runs")
 
-    for row in collections["ai_runs"] + collections["ai_saved_notes"]:
+    ocr_runs = {}
+    for row in collections.get("ocr_documents", []):
+        ref(row, "note_id", "notes")
+        ref(row, "file_id", "files")
+        ref(row, "run_id", "ai_runs")
+        _uuid(row.get("page_id"))  # Historical page identity intentionally has no FK.
+        _require(set(row) == {"id", "created_at", "owner_id", "note_id", "page_id", "file_id", "run_id",
+                              "source_sha256", "source_width", "source_height", "corrected_text", "reviewed",
+                              "revision", "updated_at"}, "invalid_ocr")
+        _require(row["run_id"] not in ocr_runs, "duplicate_record")
+        ocr_runs[row["run_id"]] = row
+        _require(_integer(row["revision"]) and 1 <= row["revision"] < 2**31 and type(row["reviewed"]) is bool,
+                 "invalid_ocr")
+        for field in ("created_at", "updated_at"):
+            _require(isinstance(row[field], str) and datetime.fromisoformat(row[field]).utcoffset() is not None,
+                     "invalid_timestamp")
+        _require(row["source_sha256"] is None or isinstance(row["source_sha256"], str)
+                 and re.fullmatch(r"[0-9a-f]{64}", row["source_sha256"]), "invalid_ocr")
+        for field in ("source_width", "source_height"):
+            _require(row[field] is None or _integer(row[field]) and 0 < row[field] < 2**31, "invalid_ocr")
+        _require((row["source_width"] is None) == (row["source_height"] is None), "invalid_ocr")
+        corrected = row["corrected_text"]
+        if corrected is not None:
+            _valid_text(corrected)
+            _require(len(corrected) <= 64_000, "invalid_ocr")
+        _require(not row["reviewed"] or corrected is not None, "invalid_ocr")
+        run = indexed["ai_runs"][row["run_id"]]
+        _require(run.get("status") in {"succeeded", "failed", "interrupted", "cancelled", "truncated"},
+                 "unsafe_processing_state")
+        _require(not row["reviewed"] or run.get("status") == "succeeded", "invalid_ocr")
+        source = run.get("source")
+        _require(isinstance(source, dict) and source.get("kind") in {"image", "pdf"}
+                 and source.get("note_id") == row["note_id"]
+                 and isinstance(source.get("pages"), list) and len(source["pages"]) == 1
+                 and isinstance(source["pages"][0], dict)
+                 and source["pages"][0].get("page_id") == row["page_id"]
+                 and source["pages"][0].get("file_id") == row["file_id"], "invalid_ocr")
+        _require(set(source) == {"kind", "note_id", "title", "revision", "mode", "pages"}
+                 and _integer(source["revision"]) and 1 <= source["revision"] < 2**31
+                 and isinstance(source["title"], str) and 0 < len(source["title"]) <= 200 and source["title"].strip(),
+                 "invalid_ocr")
+        _valid_text(source["title"])
+        frozen = source["pages"][0]
+        _require({"page_id", "number", "file_id", "reading_path", "page_revision"} <= set(frozen)
+                 <= {"page_id", "number", "file_id", "reading_path", "page_revision", "region"}
+                 and _integer(frozen["page_revision"]) and 1 <= frozen["page_revision"] < 2**31, "invalid_ocr")
+        _require(indexed["notes"][row["note_id"]].get("kind") == "image", "invalid_ocr")
+        actual = indexed["note_pages"].get(row["page_id"])
+        _require(actual is None or actual["note_id"] == row["note_id"], "source_mismatch")
+
+    learning_runs = {row['run_id'] for table in ('card_generations','quiz_generations') for row in collections.get(table,[])}
+    for row, historical in chain(
+        ((row, row["id"] in ocr_runs or row['id'] in learning_runs) for row in collections["ai_runs"]),
+        ((row, False) for row in collections["ai_saved_notes"]),
+    ):
         source = row.get("source")
         if source is None:
             continue
@@ -319,15 +399,147 @@ def _references(collections, payloads, owner):
         _require(isinstance(pages, list) and 0 < len(pages) <= MAX_ROWS, "invalid_source")
         for page in pages:
             _require(isinstance(page, dict), "invalid_source")
-            ref(page, "page_id", "note_pages")
+            if not historical:
+                ref(page, "page_id", "note_pages")
             ref(page, "file_id", "files")
-            actual = indexed["note_pages"][page["page_id"]]
-            _require(actual["note_id"] == source["note_id"] and
-                     actual["file_id"] == page["file_id"], "source_mismatch")
+            if not historical:
+                actual = indexed["note_pages"][page["page_id"]]
+                _require(actual["note_id"] == source["note_id"] and
+                         actual["file_id"] == page["file_id"], "source_mismatch")
             reading = variants.get((page["file_id"], "reading"))
             _require(reading is not None and page.get("reading_path") == reading["path"],
                      "source_mismatch")
+    if "learning_cards" in collections:
+        _learning_references(collections, indexed, payloads, variants, versions, owner)
     _require(used_assets == payload_paths - {"data.json"}, "unreferenced_asset")
+
+
+def _learning_references(collections, indexed, payloads, variants, versions, owner):
+    """Validate v3 learning identity and asset coverage without server packages."""
+    def ref(row, key, table, nullable=False):
+        value = row.get(key)
+        if value is None and nullable:
+            return
+        _require(_uuid(value) in indexed[table], "missing_reference")
+
+    def stamp(value):
+        _require(isinstance(value, str), "invalid_learning_time")
+        parsed = datetime.fromisoformat(value)
+        _require(parsed.utcoffset() is not None, "invalid_learning_time")
+        return parsed
+
+    def source(value):
+        if value is None:
+            return
+        _require(isinstance(value, dict), "invalid_source")
+        safe = {k:v for k,v in value.items() if k != "_card_identity"}
+        _source_shape(safe)
+        ref(safe, "note_id", "notes")
+        if safe['kind'] == 'text':
+            _require(set(value) == TEXT_SOURCE_FIELDS, "invalid_source")
+            version = versions.get((safe['note_id'],safe['revision']))
+            _require(version is not None, "missing_reference")
+            _text_snapshot(safe, version['snapshot'], owner)
+            return
+        _require(set(value) == {'kind','note_id','title','revision','mode','pages','_card_identity'}
+                 and len(safe['pages']) == 1, 'invalid_source')
+        identity = value['_card_identity']
+        _require(isinstance(identity,dict) and set(identity) == {'sha256','width','height','reading_sha256'}, 'invalid_source')
+        for key in ('sha256','reading_sha256'):
+            _require(isinstance(identity[key],str) and re.fullmatch(r'[0-9a-f]{64}',identity[key]), 'invalid_source')
+        for key in ('width','height'):
+            _require(_integer(identity[key]) and identity[key]>0, 'invalid_source')
+        for page in safe['pages']:
+            _require({'page_id','number','file_id','reading_path'} <= set(page)
+                     <= {'page_id','number','file_id','reading_path','page_revision','region'}, 'invalid_source')
+            if safe['kind']=='image' or 'page_revision' in page:
+                _require(_integer(page.get('page_revision')) and page['page_revision']>0, 'invalid_source')
+            ref(page,'file_id','files')
+            file = indexed['files'][page['file_id']]
+            actual = indexed['note_pages'].get(page['page_id'])
+            _require(actual is None or actual['note_id'] == safe['note_id'], 'source_mismatch')
+            reading = variants.get((page['file_id'],'reading'))
+            _require(reading is not None and reading['path'] == page['reading_path']
+                     and (file['sha256'],file['width'],file['height']) == (identity['sha256'],identity['width'],identity['height'])
+                     and payloads[reading['path']]['sha256'] == identity['reading_sha256'], 'source_mismatch')
+
+    links = {
+        'card_generations': [('deck_id','learning_decks',False),('run_id','ai_runs',False)],
+        'learning_cards': [('deck_id','learning_decks',False),('generation_id','card_generations',True)],
+        'quiz_questions': [('quiz_id','learning_quizzes',False)],
+        'quiz_attempts': [('quiz_id','learning_quizzes',False)],
+        'quiz_answers': [('attempt_id','quiz_attempts',False)],
+        'quiz_operations': [('attempt_id','quiz_attempts',False)],
+        'quiz_answer_reviews': [('answer_id','quiz_answers',False)],
+        'quiz_generations': [('quiz_id','learning_quizzes',True),('run_id','ai_runs',False)],
+        'quiz_gradings': [('answer_id','quiz_answers',False),('run_id','ai_runs',False)],
+        'review_plans': [('item_id','review_items',False)],
+        'review_logs': [('item_id','review_items',False),('plan_id','review_plans',True)],
+    }
+    for table in LEARNING_TABLES:
+        for row in collections[table]:
+            _require(set(row)==LEARNING_COLUMNS[table], 'invalid_learning_fields')
+            for key,target,nullable in links.get(table,[]):
+                ref(row,key,target,nullable)
+            if 'source' in row:
+                source(row['source'])
+            if 'request_hash' in row:
+                _require(isinstance(row['request_hash'],str) and re.fullmatch(r'[0-9a-f]{64}',row['request_hash']), 'invalid_learning_receipt')
+            if 'request_key' in row:
+                _uuid(row['request_key'])
+            if 'revision' in row:
+                _require(_integer(row['revision']) and row['revision']>0, 'invalid_learning_revision')
+            stamp(row['created_at'])
+    for table in ('card_generations','quiz_generations','quiz_gradings'):
+        for row in collections[table]:
+            _require(row['status'] in {'succeeded','failed'}, 'unfinished_learning_request')
+    snapshots = {}
+    for attempt in collections['quiz_attempts']:
+        snapshot = attempt['snapshot']
+        _require(isinstance(snapshot,list) and 1 <= len(snapshot) <= 50, 'invalid_learning_snapshot')
+        ids = set()
+        for question in snapshot:
+            identity = _uuid(question['id'])
+            _require(identity not in ids, 'duplicate_record')
+            ids.add(identity)
+            source(question['source'])
+        snapshots[attempt['id']] = ids
+    for answer in collections['quiz_answers']:
+        _require(answer['question_id'] in snapshots[answer['attempt_id']], 'missing_reference')
+    for table in ('review_items','learning_events'):
+        for row in collections[table]:
+            present = [(kind,row.get(kind+'_id')) for kind in ('note','card','quiz') if row.get(kind+'_id') is not None]
+            _require(len(present)==1, 'invalid_learning_resource')
+            kind,_ = present[0]
+            ref(row,kind+'_id',{'note':'notes','card':'learning_cards','quiz':'learning_quizzes'}[kind])
+            if table == 'review_items':
+                _require(row['kind']==kind, 'invalid_learning_resource')
+    for row in collections['review_logs']:
+        if row['plan_id'] is not None:
+            _require(indexed['review_plans'][row['plan_id']]['item_id']==row['item_id'], 'source_mismatch')
+    for row in collections['review_plans']:
+        _require(row['strategy'] in {'manual','fsrs'} and row['status'] in {'active','paused','archived'}, 'invalid_learning_plan')
+        expected = 'manual/1' if row['strategy']=='manual' else 'py-fsrs/6.3.2'
+        _require(row['algorithm_version']==expected and isinstance(row['scheduler_state'],dict), 'invalid_learning_plan')
+        if row['strategy']=='manual':
+            _require(row['scheduler_state']=={}, 'invalid_learning_plan')
+        else:
+            _require(set(row['scheduler_state'])=={'card'} and isinstance(row['scheduler_state']['card'],dict), 'invalid_learning_plan')
+        saved = row['last_fsrs_state']
+        _require(saved is None or isinstance(saved,dict) and set(saved)=={'algorithm_version','scheduler_state'}
+                 and saved['algorithm_version']=='py-fsrs/6.3.2' and isinstance(saved['scheduler_state'],dict), 'invalid_learning_plan')
+    for row in collections['learning_events']:
+        _uuid(row['event_id'])
+        started,ended = stamp(row['started_at']),stamp(row['ended_at'])
+        _require(0<(ended-started).total_seconds()<=60, 'invalid_learning_time')
+        expected = {'reading':'note_id','card_practice':'card_id','quiz':'quiz_id'}
+        _require(row['kind']=='review' or row['kind'] in expected and row[expected[row['kind']]] is not None, 'invalid_learning_resource')
+    for row in collections['daily_review_digests']:
+        from datetime import date
+        _require(isinstance(row['local_date'],str) and date.fromisoformat(row['local_date']).isoformat()==row['local_date']
+                 and row['kind']=='daily_review' and isinstance(row['counts'],dict)
+                 and set(row['counts'])=={'note','card','quiz'}
+                 and all(_integer(v) and v>=0 for v in row['counts'].values()), 'invalid_learning_digest')
 
 
 def verify_archive(path):
@@ -356,7 +568,7 @@ def verify_archive(path):
                      <= MAX_METADATA_BYTES, "metadata_too_large")
             manifest = _metadata(archive, by_path["manifest.json"])
             _require(isinstance(manifest, dict) and manifest.get("format") == FORMAT and
-                     type(manifest.get("version")) is int and manifest["version"] == VERSION,
+                     type(manifest.get("version")) is int and manifest["version"] in TABLES_BY_VERSION,
                      "unsupported_format")
             _require(manifest.get("resume_processing") is False, "unsafe_processing_state")
             timestamp = manifest.get("exported_at")
@@ -395,13 +607,14 @@ def verify_archive(path):
                 _require(actual_size == item["bytes"] and digest.hexdigest() == item["sha256"],
                          "checksum_mismatch")
             data = _metadata(archive, by_path["data.json"])
+            tables = TABLES_BY_VERSION[manifest["version"]]
             _require(isinstance(data, dict) and set(data) == {"collections"} and
                      isinstance(data["collections"], dict) and
-                     set(data["collections"]) == set(TABLES), "invalid_collections")
+                     set(data["collections"]) == set(tables), "invalid_collections")
             collections = data["collections"]
             counts = manifest.get("counts")
-            _require(isinstance(counts, dict) and set(counts) == set(TABLES), "invalid_counts")
-            for table in TABLES:
+            _require(isinstance(counts, dict) and set(counts) == set(tables), "invalid_counts")
+            for table in tables:
                 _require(isinstance(collections[table], list) and _integer(counts[table]) and
                          counts[table] == len(collections[table]), "count_mismatch")
             _references(collections, declared, owner_id)

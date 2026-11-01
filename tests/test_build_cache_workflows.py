@@ -106,8 +106,8 @@ class BuildCacheWorkflowTests(unittest.TestCase):
                 self.assertEqual(setup["uses"].split("@")[1], "v4")
                 self.assertEqual(setup["with"]["driver"], "docker-container")
                 builds = action_steps(job, "docker/build-push-action")
-                self.assertEqual(len(builds), 2)
-                self.assertEqual({build["with"]["context"] for build in builds}, {"./backend", "./frontend"})
+                self.assertEqual(len(builds), 3)
+                self.assertEqual({build["with"]["context"] for build in builds}, {"./backend", "./frontend", "./ops/postgres"})
                 for build in builds:
                     self.assertLess(job["steps"].index(setup), job["steps"].index(build))
                     self.assertEqual(build["uses"].split("@")[1], "v7")
@@ -157,7 +157,7 @@ class BuildCacheWorkflowTests(unittest.TestCase):
                     exported = cache_parameters(build["with"]["cache-to"])
                     self.assertEqual(exported, dict(imported, mode="max"))
                 scopes[context] = imported["scope"]
-        self.assertEqual(len(set(scopes.values())), 2)
+        self.assertEqual(len(set(scopes.values())), 3)
 
     def test_all_existing_ci_verification_stages_remain_mandatory(self):
         job = self.ci["jobs"]["verify"]
@@ -190,15 +190,26 @@ class BuildCacheWorkflowTests(unittest.TestCase):
                     self.assertEqual(step.get("working-directory"), directory)
                     self.assertNotIn("if", step)
                     self.assertFalse(step.get("continue-on-error", False))
-        self.assertEqual(job["services"]["postgres"]["image"], "postgres:16.8")
-        self.assertEqual(migration["env"]["SITE_BACKUP_TEST_CONTAINER"], "${{ job.services.postgres.id }}")
+        start_index, start, start_command = self.find_command(job, ["docker", "compose", "-f", "compose.test.yaml", "up"])
+        self.assertIn("--no-build", start_command)
+        self.assertIn("--wait", start_command)
+        self.assertIn("SITE_BACKUP_TEST_CONTAINER=", start["run"])
+        self.assertIn('docker compose -f compose.test.yaml ps -q db', start["run"])
+        self.assertLess(start_index, job["steps"].index(migration))
+        self.assertNotIn("services", job)
+        self.assertIn("55432/notes_test", job["env"]["TEST_DATABASE_URL"])
+        postgres, = [build for build in action_steps(job, "docker/build-push-action") if build["with"]["context"] == "./ops/postgres"]
+        self.assertEqual(postgres["with"]["tags"], "ai-notes-postgres:local")
+        self.assertLess(job["steps"].index(postgres), start_index)
+        self.assertEqual(job["steps"][-1]["if"], "always()")
+        self.assertIn("compose.test.yaml down", job["steps"][-1]["run"])
 
     def test_https_verifier_consumes_both_loaded_images_without_rebuilding(self):
         job = self.ci["jobs"]["verify"]
         index, step, command = self.find_command(job, ["python", "scripts/verify_https_isolated.py"])
         options = dict(zip(command[2::2], command[3::2]))
         self.assertEqual(set(options), {"--frontend-image", "--python-image"})
-        loaded = {build["with"]["tags"] for build in action_steps(job, "docker/build-push-action")}
+        loaded = {build["with"]["tags"] for build in action_steps(job, "docker/build-push-action") if build["with"]["context"] != "./ops/postgres"}
         self.assertEqual({image if ":" in image else image + ":latest" for image in options.values()}, loaded)
         for build in action_steps(job, "docker/build-push-action"):
             self.assertLess(job["steps"].index(build), index)
@@ -207,8 +218,8 @@ class BuildCacheWorkflowTests(unittest.TestCase):
         all_commands = [command for step in job["steps"] for command in commands(step)]
         self.assertFalse(any(command[:2] == ["docker", "build"] or command[:3] == ["docker", "compose", "build"] for command in all_commands))
         compose = load_yaml("compose.yaml")
-        self.assertEqual({service["build"] for service in compose["services"].values() if "build" in service}, {"./backend", "./frontend"})
-        self.assertNotIn("build", compose["services"]["db"])
+        self.assertEqual({service["build"] for service in compose["services"].values() if "build" in service}, {"./backend", "./frontend", "./ops/postgres"})
+        self.assertEqual(compose["services"]["db"]["build"], "./ops/postgres")
 
     def test_dependency_caches_follow_existing_lockfiles(self):
         job = self.ci["jobs"]["verify"]
@@ -333,10 +344,13 @@ class BuildCacheWorkflowTests(unittest.TestCase):
             labels = dict(line.split("=", 1) for line in build["with"]["labels"].splitlines())
             self.assertEqual(labels["org.opencontainers.image.source"], "https://github.com/${{ github.repository }}")
             self.assertEqual(labels["org.opencontainers.image.revision"], "${{ github.sha }}")
-        _, _, pull = self.find_command(job, ["docker", "pull"])
-        self.assertEqual(pull[2:], ["--platform", "linux/amd64", "postgres:16.8-alpine"])
-        _, _, tag = self.find_command(job, ["docker", "tag"])
-        self.assertEqual(tag[2:], ["postgres:16.8-alpine", "$ACR_REGISTRY/$ACR_NAMESPACE/postgres:$RELEASE_TAG"])
+        # The database is now built from the pinned PG16.8 + vector source rather
+        # than retagging an upstream image with no vector extension available.
+        database_dockerfile = (ROOT / "ops/postgres/Dockerfile").read_text(encoding="utf-8")
+        self.assertIn("FROM postgres:16.8-alpine", database_dockerfile)
+        self.assertIn("--checksum=sha256:", database_dockerfile)
+        self.assertIn("refs/tags/v0.8.7", database_dockerfile)
+        self.assertIn('make OPTFLAGS=""', database_dockerfile)
         push_index, push, _ = self.find_command(job, ["docker", "push"])
         self.assertEqual(re.findall(r"for image in (.*?); do", push["run"]), ["backend frontend postgres", "backend frontend postgres"])
         self.assertIn(".RepoDigests", push["run"])

@@ -2,7 +2,7 @@ from uuid import UUID
 from fastapi import APIRouter, Request, Query
 from sqlalchemy import select
 from app.shared.dependencies import DB, CurrentUser, Admin
-from app.shared.models import Job, Notification
+from app.shared.models import Job, Notification, Outbox
 from app.shared.permissions import require_owner, audit
 from app.shared.errors import AppError
 from app.shared.db import utcnow
@@ -39,6 +39,8 @@ def retry(job_id: UUID, request: Request, db: DB, admin: Admin):
     job = db.scalar(select(Job).where(Job.id == job_id).with_for_update())
     if not job:
         raise AppError(404, "not_found", "任务不存在")
+    if job.kind == "semantic.build":
+        raise AppError(409, "semantic_retry_forbidden", "付费索引任务禁止自动重放，请重新预览并发起新构建")
     if job.status != "failed":
         raise AppError(409, "retry_unavailable", "仅失败任务可以重试")
     job.status, job.attempts, job.run_after = "queued", 0, utcnow()
@@ -56,7 +58,10 @@ def admin_jobs(db: DB, admin: Admin, limit: int = Query(50, ge=1, le=100)):
 
 @router.get("/notifications", response_model=list[s.NotificationOut])
 def notifications(db: DB, user: CurrentUser, limit: int = Query(30, ge=1, le=100)):
-    return db.scalars(select(Notification).where(Notification.user_id == user.id).order_by(Notification.created_at.desc(), Notification.id).limit(limit)).all()
+    events = db.execute(select(Notification,Outbox.kind).join(Outbox,Outbox.id==Notification.event_id).where(
+        Notification.user_id==user.id,Outbox.user_id==user.id).order_by(Notification.created_at.desc(),Notification.id).limit(limit))
+    return [s.NotificationOut.model_validate(notice).model_copy(update={
+        'target':'reviews' if kind=='review.daily' else None}) for notice,kind in events]
 
 
 @router.post("/notifications/{notification_id}/read", response_model=s.NotificationOut)
@@ -66,4 +71,6 @@ def read_notification(notification_id: UUID, db: DB, user: CurrentUser):
         raise AppError(404, "not_found", "通知不存在")
     n.read_at = n.read_at or utcnow()
     db.commit()
-    return n
+    event = db.get(Outbox,n.event_id)
+    return s.NotificationOut.model_validate(n).model_copy(update={
+        'target':'reviews' if event and event.user_id==user.id and event.kind=='review.daily' else None})

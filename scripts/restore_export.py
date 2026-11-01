@@ -7,7 +7,7 @@ starts workers, restores credentials, or resumes model/processing requests.
 
 import argparse
 from contextlib import contextmanager
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 import getpass
 import hashlib
 import importlib.util
@@ -27,7 +27,7 @@ sys.path.insert(0, str(REPOSITORY / "backend"))
 
 from alembic.config import Config  # noqa: E402
 from alembic.script import ScriptDirectory  # noqa: E402
-from sqlalchemy import BigInteger, DateTime, Integer, String, Text, Uuid, create_engine, insert, inspect, select, text  # noqa: E402
+from sqlalchemy import BigInteger, Boolean, Date, DateTime, Integer, String, Text, Uuid, create_engine, insert, inspect, null, select, text  # noqa: E402
 from sqlalchemy.engine import make_url  # noqa: E402
 from sqlalchemy.dialects.postgresql import JSONB  # noqa: E402
 from sqlalchemy.exc import SQLAlchemyError  # noqa: E402
@@ -36,6 +36,8 @@ from app.modules.ai.schemas import RunOut  # noqa: E402
 from app.modules.ai.source_context import public_source  # noqa: E402
 from app.modules.ai.text_context import validate_snapshot  # noqa: E402
 from app.modules.exports.service import FIELDS  # noqa: E402
+from app.modules.exports.learning_archive import FIELDS as LEARNING_FIELDS  # noqa: E402
+from app.modules.exports.learning_restore import prepare as prepare_learning  # noqa: E402
 from app.modules.files.models import UploadSession  # noqa: E402
 from app.modules.files.storage import LocalStorage  # noqa: E402
 from app.modules.notes.models import Folder  # noqa: E402
@@ -44,6 +46,7 @@ from app.shared.db import Base  # noqa: E402
 from app.shared.config import settings  # noqa: E402
 from app.shared.models import Job, User  # noqa: E402
 from app.shared.security import hasher  # noqa: E402
+from app.shared.errors import AppError  # noqa: E402
 
 
 MAX_ARCHIVE_BYTES = 528 * 1024 * 1024
@@ -219,7 +222,12 @@ def _column_value(column, value):
         result = datetime.fromisoformat(value)
         _require(result.utcoffset() is not None)
         return result
-    if isinstance(column.type, (Integer, BigInteger)):
+    if isinstance(column.type, Date):
+        _require(isinstance(value,str) and date.fromisoformat(value).isoformat()==value)
+        return date.fromisoformat(value)
+    if isinstance(column.type, Boolean):
+        _require(type(value) is bool)
+    elif isinstance(column.type, (Integer, BigInteger)):
         limit = 2 ** (63 if isinstance(column.type, BigInteger) else 31)
         _require(type(value) is int and -limit <= value < limit)
     elif isinstance(column.type, (String, Text)):
@@ -241,7 +249,7 @@ def _unique(rows, fields):
     _require(len(set(values)) == len(values))
 
 
-def _source(source, *, internal, notes, versions, pages, files, variants, keys, pdf_imports):
+def _source(source, *, internal, notes, versions, pages, files, variants, keys, pdf_imports, historical=False):
     if source is None:
         return None
     _require(isinstance(source, dict))
@@ -263,31 +271,38 @@ def _source(source, *, internal, notes, versions, pages, files, variants, keys, 
     _require(source["mode"] in ({"page", "region"} if image else {"pages", "all", "region"}))
     if image:
         _require(len(selected) == 1 and (source["mode"] == "region") == (selected[0].get("region") is not None))
-    else:
+    elif not historical:
         item = pdf_imports[source["note_id"]]
         _require(item["page_count"] is not None)
     seen_ids, seen_numbers = set(), set()
     for frozen in selected:
         expected_fields = {"page_id", "number", "file_id", "reading_path"} | ({"region"} if image else set())
+        if historical and image:
+            expected_fields.add("page_revision")
         # v1 PDF exports omitted region. New full-page exports may carry null;
         # a region source must retain its validated rectangle exactly.
-        _require(isinstance(frozen, dict) and (set(frozen) == expected_fields
-                 or not image and set(frozen) == expected_fields | {"region"}))
+        optional_fields = ({'region'} if not image else set()) | ({'page_revision'} if historical and not image else set())
+        _require(isinstance(frozen,dict) and expected_fields <= set(frozen) <= expected_fields | optional_fields)
+        if 'page_revision' in frozen:
+            _positive(frozen['page_revision'])
         _positive(frozen["number"])
         _require(frozen["page_id"] not in seen_ids and frozen["number"] not in seen_numbers)
         seen_ids.add(frozen["page_id"])
         seen_numbers.add(frozen["number"])
-        actual = pages[frozen["page_id"]]
+        actual = pages.get(frozen["page_id"])
         file = files[frozen["file_id"]]
         variant = variants[(frozen["file_id"], "reading")]
-        _require(str(actual["note_id"]) == source["note_id"] and actual["file_id"] == file["id"]
-                 and file["status"] == "ready" and file["mime"] != "application/pdf"
+        _require(file["status"] == "ready" and file["mime"] != "application/pdf"
                  and frozen["reading_path"] == f"objects/{file['id']}/variants/{variant['id']}")
-        _require(actual["pdf_page_number"] is None if image else actual["pdf_page_number"] == frozen["number"])
+        if historical:
+            _require(actual is None or str(actual["note_id"]) == source["note_id"])
+        else:
+            _require(actual is not None and str(actual["note_id"]) == source["note_id"] and actual["file_id"] == file["id"])
+            _require(actual["pdf_page_number"] is None if image else actual["pdf_page_number"] == frozen["number"])
         _require(variant["bytes"] <= 8 * 1024 * 1024)
-        if not image:
+        if not image and not historical:
             _require(frozen["number"] <= item["page_count"])
-    if not image and source["mode"] == "all":
+    if not image and source["mode"] == "all" and not historical:
         # selected is bounded to 200 before constructing this range. A damaged
         # processing import's large page_count must never cause an allocation.
         _require(len(selected) == item["page_count"]
@@ -299,6 +314,8 @@ def _source(source, *, internal, notes, versions, pages, files, variants, keys, 
     for frozen, original in zip(safe["pages"], selected, strict=True):
         variant = variants[(original["file_id"], "reading")]
         frozen.update(file_id=original["file_id"], object_key=keys[original["reading_path"]], bytes=variant["bytes"])
+        if historical and 'page_revision' in original:
+            frozen["page_revision"] = original["page_revision"]
     return safe
 
 
@@ -317,6 +334,10 @@ def _prepare(manifest, collections, prefix):
         # upload limit. Refuse a larger object before allocating its contents.
         _require(all(item["path"] == "data.json" or item["bytes"] <= MAX_OBJECT_BYTES
                      for item in manifest["payloads"]), "restore_object_too_large")
+        _require(type(manifest["version"]) is int and manifest["version"] in {1, 2, 3})
+        old_excluded = {model.__tablename__ for model in LEARNING_FIELDS} if manifest['version']<3 else set()
+        expected_tables = set(MODELS) - old_excluded - ({"ocr_documents"} if manifest["version"] == 1 else set())
+        _require(set(collections) == expected_tables)
         rows, indexes, keys = {}, {}, {}
         for table, model in MODELS.items():
             required = set(FIELDS[model])
@@ -325,7 +346,7 @@ def _prepare(manifest, collections, prefix):
             elif table == "file_variants":
                 required.add("path")
             rows[table] = []
-            for record in collections[table]:
+            for record in collections.get(table, []):
                 _require(required <= set(record) <= required | EXTRA_FIELDS.get(table, set()))
                 row = {name: _column_value(model.__table__.c[name], record[name]) for name in FIELDS[model]}
                 if "revision" in row:
@@ -345,6 +366,7 @@ def _prepare(manifest, collections, prefix):
         _unique(rows["ai_steps"], ("run_id", "position"))
         _unique(rows["ai_saved_notes"], ("run_id",))
         _unique(rows["ai_saved_notes"], ("note_id",))
+        _unique(rows["ocr_documents"], ("run_id",))
         for row in rows["notes"]:
             _require(row["kind"] in {"text", "image"} and isinstance(row["body_json"], dict))
             validate_body(row["body_json"], row["plain_text"])
@@ -429,14 +451,20 @@ def _prepare(manifest, collections, prefix):
             row["request_hash"] = hashlib.sha256(uuid4().bytes).hexdigest()
         for row in rows["ai_conversations"]:
             row["request_key"] = uuid4()
+        ocr_runs = {row["run_id"]: row for row in rows["ocr_documents"]}
+        learning_runs = {row['run_id'] for table in ('card_generations','quiz_generations') for row in rows[table]}
         for row in rows["ai_runs"]:
             _require(row["status"] in TERMINAL_RUNS and isinstance(row["usage"], (dict, type(None)))
                      and isinstance(row["progress"], (dict, type(None))) and bool(row["prompt"].strip()))
             row.update(request_key=uuid4(), request_hash=hashlib.sha256(uuid4().bytes).hexdigest(), input_messages=[], lease_until=None)
-            row["source"] = _source(row["source"], internal=True, notes=notes, versions=versions, pages=pages, files=files, variants=variants, keys=keys, pdf_imports=pdf_by_note)
+            row["source"] = _source(row["source"], internal=True, notes=notes, versions=versions, pages=pages, files=files, variants=variants, keys=keys, pdf_imports=pdf_by_note, historical=row["id"] in ocr_runs or row['id'] in learning_runs)
             # API consumers must be able to read restored metadata, including
             # usage/progress. Do not normalize or rewrite its valid JSON.
             RunOut.model_validate(row)
+        for row in rows["ocr_documents"]:
+            row.update(request_key=uuid4(), request_hash=hashlib.sha256(uuid4().bytes).hexdigest())
+            # The offline verifier checks ownership, frozen identity, bounds,
+            # and terminal runs before any target database or storage is opened.
         normalized_steps = 0
         for row in rows["ai_steps"]:
             _positive(row["position"], zero=True)
@@ -461,10 +489,12 @@ def _prepare(manifest, collections, prefix):
             _require(not row["cited_page_numbers"] or row["source"] is not None
                      and row["source"]["kind"] != "text"
                      and set(row["cited_page_numbers"]) <= {page["number"] for page in row["source"]["pages"]})
+        prepare_learning(rows, restore_source=_source, source_context=dict(notes=notes, versions=versions,
+            pages=pages, files=files, variants=variants, keys=keys, pdf_imports=pdf_by_note))
         return rows, keys, normalized_steps
     except RestoreError:
         raise
-    except (ValueError, TypeError, KeyError, UnicodeError, OverflowError, RecursionError):
+    except (ValueError, TypeError, KeyError, UnicodeError, OverflowError, RecursionError, AppError):
         raise RestoreError("restore_schema_invalid") from None
 
 
@@ -526,7 +556,16 @@ def _insert_rows(connection, model, rows):
     # Core multi-row inserts require identical column keys. All synthesized
     # rows have identical fields; chunks avoid the PostgreSQL bind limit.
     for start in range(0, len(rows), 100):
-        connection.execute(insert(model.__table__), rows[start:start + 100])
+        groups = {}
+        for row in rows[start:start+100]:
+            # JSON null and SQL NULL are distinct. Optional structured state
+            # uses SQL NULL (e.g. an absent saved FSRS state), not a JSON scalar.
+            absent = tuple(name for name,value in row.items() if value is None
+                and isinstance(model.__table__.c[name].type,JSONB) and model.__table__.c[name].nullable)
+            groups.setdefault(absent,[]).append({key:value for key,value in row.items() if key not in absent})
+        for absent, records in groups.items():
+            statement = insert(model.__table__).values(**{name:null() for name in absent})
+            connection.execute(statement,records)
 
 
 def _write_objects(archive, manifest, keys, storage):

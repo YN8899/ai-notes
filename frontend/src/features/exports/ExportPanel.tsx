@@ -40,7 +40,7 @@ export function ExportPanel({ owner }: { owner: string }) {
   }
   return <details className="panel export-panel">
     <summary>完整导出</summary>
-    <p>将当前账号的笔记（含回收站）、文件夹、笔记本、标签、正文与历史版本、原图、PDF 原件及阅读图片、AI 对话与来源选区一起打包为 ZIP。</p>
+    <p>将当前账号的笔记（含回收站）、文件与历史版本、AI 对话及来源、学习卡片、测验与作答、复习计划和日志、提醒偏好与学习记录一起打包为 ZIP。</p>
     <p className="muted">只包含已同步到服务器的内容。请等待笔记保存、上传和后台转换完成后再导出。此 ZIP 用于归档，目前尚无一键导入功能。</p>
     <p className="muted">单次未压缩内容最多 512 MiB。下载期间浏览器会临时使用内存接收文件，请保持页面打开；打包较久或网络中断时可以重试。</p>
     {progress ? <p role="status">{progress.phase === 'preparing' ? '正在生成完整导出文件…' : `正在接收 ZIP：${mib(progress.received)} MiB${progress.total === undefined ? '' : ' / ' + mib(progress.total) + ' MiB'}`}</p> : null}

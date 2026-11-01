@@ -36,9 +36,27 @@ def readable_source(source):
         raise AppError(409, prefix + "_source_unavailable", "回答来源记录已损坏，无法读取来源范围") from None
 
 
+def quiz_conversation(db, conversation_id):
+    from app.modules.learning.quiz_models import QuizGeneration, QuizGrading
+    for model in (QuizGeneration, QuizGrading):
+        if db.scalar(select(model.id).join(AiRun, AiRun.id == model.run_id).where(AiRun.conversation_id == conversation_id).limit(1)):
+            return True
+    return False
+
+
 def conversation(db, owner, conversation_id):
     row = db.scalar(select(AiConversation).where(AiConversation.id == conversation_id, AiConversation.owner_id == owner))
     if not row:
+        raise AppError(404, "conversation_not_found", "对话不存在")
+    if quiz_conversation(db, conversation_id):
+        raise AppError(404, "conversation_not_found", "对话不存在")
+    from app.modules.search.models import OcrDocument
+    if db.scalar(select(OcrDocument.id).join(AiRun, AiRun.id == OcrDocument.run_id).where(
+            AiRun.conversation_id == conversation_id).limit(1)):
+        raise AppError(404, "conversation_not_found", "对话不存在")
+    from app.modules.learning.models import CardGeneration
+    if db.scalar(select(CardGeneration.id).join(AiRun, AiRun.id == CardGeneration.run_id).where(
+            AiRun.conversation_id == conversation_id).limit(1)):
         raise AppError(404, "conversation_not_found", "对话不存在")
     return row
 
@@ -46,6 +64,8 @@ def conversation(db, owner, conversation_id):
 def get_run(db, owner, run_id):
     row = db.scalar(select(AiRun).where(AiRun.id == run_id, AiRun.owner_id == owner))
     if not row:
+        raise AppError(404, "run_not_found", "对话运行不存在")
+    if quiz_conversation(db, row.conversation_id):
         raise AppError(404, "run_not_found", "对话运行不存在")
     readable_source(row.source)
     return row
@@ -59,7 +79,7 @@ def runs(db, owner, conversation_id):
     return rows
 
 
-def create_run(db, owner, conversation_id, data):
+def create_run(db, owner, conversation_id, data, *, commit=True):
     parent = conversation(db, owner, conversation_id)
     payload = data.model_dump(mode="json")
     if data.image is None:
@@ -144,7 +164,10 @@ def create_run(db, owner, conversation_id, data):
                         "completed_batches": 0, "total_batches": len(groups), "call_count": 0,
                         "planned_calls": pdf_context.planned_calls(len(groups)), "current_pages": [], "usage_complete": False}
     db.add(row)
-    db.commit()
+    if commit:
+        db.commit()
+    else:
+        db.flush()
     return row
 
 
@@ -246,6 +269,14 @@ def validate_execution_sources(run_id):
     from app.modules.ai import source_context
     with SessionLocal() as db:
         row = db.get(AiRun, run_id)
+        from app.modules.search.service import validate_run
+        validate_run(db, row)
+        from app.modules.learning.card_generation import validate_run as validate_card_run
+        validate_card_run(db, row)
+        from app.modules.learning.quiz_generation import validate_run as validate_quiz_generation
+        from app.modules.learning.quiz_grading import validate_run as validate_quiz_grading
+        validate_quiz_generation(db, row)
+        validate_quiz_grading(db, row)
         sources = [item.source for item in db.scalars(select(AiRun).where(
             AiRun.owner_id == row.owner_id, AiRun.conversation_id == row.conversation_id,
             AiRun.status == "succeeded")) if item.source is not None]

@@ -1,10 +1,11 @@
-"""Frozen schema evidence for the one supported pre-PDF site revision.
+"""Frozen schema evidence for explicit pre-PDF, pre-OCR and OCR revisions.
 
 The catalog is generated once from a new PostgreSQL 16 database migrated through
 344f1b4b059e -> b5ebe7f299de -> 0b3b93086d90 -> c2e41a9f3b67. It contains no
 application rows. Its migration hashes use UTF-8 source bytes with CRLF changed
 to LF, so an ordinary Windows checkout does not alter the provenance evidence.
-Eight CHECK strings also retain their exact PostgreSQL 16 dump/restore spelling:
+The pre-PDF catalog retains eight exact PostgreSQL 16 CHECK dump/restore spellings;
+the newer catalogs add three PDF/AI CHECK spellings measured the same way:
 the parser moves an array text cast onto each literal when recreating that DDL.
 Only these two complete strings per named constraint are accepted, with every
 other catalog field compared exactly. No general SQL rewrite is performed.
@@ -29,6 +30,29 @@ LEGACY_TABLE_NAMES = frozenset({
     "outbox_events", "password_resets", "rate_buckets", "sessions", "tags",
     "upload_sessions", "users",
 })
+PRE_OCR_REVISION = "2ef16e7ca892"  # c39 application, 27 tables.
+OCR_REVISION = "7c0a9d2e4f61"
+SEMANTIC_REVISION = "b81d4f0a6c32"
+CARD_REVISION = "c4d72e9a1f03"
+REVIEW_REVISION = "d58a3b7c901e"
+QUIZ_REVISION = "e62a9c4f710b"
+REMINDER_REVISION = "f73b5d8a201c"
+EVENT_REVISION = "84c6e9b302df"
+PRE_OCR_TABLE_NAMES = LEGACY_TABLE_NAMES | {
+    "pdf_imports", "ai_conversations", "ai_runs", "ai_steps", "ai_saved_notes",
+}
+OCR_TABLE_NAMES = PRE_OCR_TABLE_NAMES | {"ocr_documents"}
+SEMANTIC_TABLE_NAMES = OCR_TABLE_NAMES | {"semantic_indexes", "semantic_chunks", "semantic_queries", "semantic_calls"}
+CARD_TABLE_NAMES = SEMANTIC_TABLE_NAMES | {"learning_decks", "learning_cards", "card_generations"}
+REVIEW_TABLE_NAMES = CARD_TABLE_NAMES | {"learning_quizzes", "review_items", "review_plans", "review_logs"}
+QUIZ_TABLE_NAMES = REVIEW_TABLE_NAMES | {"quiz_questions", "quiz_attempts", "quiz_answers", "quiz_operations",
+                                       "quiz_answer_reviews", "quiz_generations", "quiz_gradings"}
+REMINDER_TABLE_NAMES = QUIZ_TABLE_NAMES | {"user_learning_settings", "daily_review_digests"}
+EVENT_TABLE_NAMES = REMINDER_TABLE_NAMES | {"learning_events"}
+FROZEN_TABLE_NAMES = {PRE_OCR_REVISION: PRE_OCR_TABLE_NAMES, OCR_REVISION: OCR_TABLE_NAMES,
+                      SEMANTIC_REVISION: SEMANTIC_TABLE_NAMES, CARD_REVISION: CARD_TABLE_NAMES,
+                      REVIEW_REVISION: REVIEW_TABLE_NAMES, QUIZ_REVISION: QUIZ_TABLE_NAMES,
+                      REMINDER_REVISION: REMINDER_TABLE_NAMES, EVENT_REVISION: EVENT_TABLE_NAMES}
 LEGACY_CATALOG_PATH = (Path(__file__).resolve().parents[1] / "ops" /
                        "site-backup-profiles" / f"{LEGACY_REVISION}.json")
 _MIGRATIONS = frozenset({
@@ -50,6 +74,22 @@ _RESTORED_CHECKS = {
     "upload_sessions": {"upload_status"},
     "users": {"user_role", "user_status"},
 }
+_FROZEN_RESTORED_CHECKS = {**_RESTORED_CHECKS,
+    "pdf_imports": {"pdf_status"}, "ai_runs": {"ai_run_status"}, "ai_steps": {"ai_step_state"}}
+_SEMANTIC_RESTORED_CHECKS = {**_FROZEN_RESTORED_CHECKS,
+    "semantic_indexes": {"semantic_index_status"}, "semantic_queries": {"semantic_query_status"},
+    "semantic_calls": {"semantic_call_status"}}
+_CARD_RESTORED_CHECKS = {**_SEMANTIC_RESTORED_CHECKS,
+    "learning_decks": {"learning_deck_state"},
+    "learning_cards": {"learning_card_state", "learning_card_kind"},
+    "card_generations": {"card_generation_state", "card_generation_kind"}}
+_REVIEW_RESTORED_CHECKS = {**_CARD_RESTORED_CHECKS,
+    "learning_quizzes": {"learning_quiz_state"}, "review_plans": {"review_plan_state"},
+    "review_logs": {"review_log_action", "review_log_plan_rating"}}
+_QUIZ_RESTORED_CHECKS = {**_REVIEW_RESTORED_CHECKS,
+    "quiz_questions": {"quiz_question_kind"}, "quiz_attempts": {"quiz_attempt_state"},
+    "quiz_answers": {"quiz_answer_state"}, "quiz_generations": {"quiz_generation_state"},
+    "quiz_gradings": {"quiz_grading_state"}}
 _CONSTRAINT_FLAGS = {"deferrable", "initially_deferred", "validated"}
 
 
@@ -80,6 +120,92 @@ def _canonical(value):
 def _ordered(items):
     return sorted(items, key=lambda item: json.dumps(item, sort_keys=True,
                                                     separators=(",", ":"), allow_nan=False))
+
+
+def capture_vector_catalog(connection):
+    """Extension membership and function definitions, independent of app rows.
+
+    Merely excluding extension members would let ALTER EXTENSION ADD hide an
+    unrelated routine. Compare a frozen clean-install inventory as well.
+    """
+    return [dict(row) for row in connection.execute(text("""
+        SELECT pg_describe_object(d.classid,d.objid,d.objsubid) AS identity,
+               CASE WHEN d.classid='pg_proc'::regclass THEN (
+                        SELECT CASE WHEN p.prokind <> 'a' THEN pg_get_functiondef(p.oid)
+                          ELSE (SELECT jsonb_build_object(
+                            'transition', a.aggtransfn::regprocedure::text,
+                            'final', a.aggfinalfn::regprocedure::text,
+                            'combine', a.aggcombinefn::regprocedure::text,
+                            'serial', a.aggserialfn::regprocedure::text,
+                            'deserial', a.aggdeserialfn::regprocedure::text,
+                            'moving_transition', a.aggmtransfn::regprocedure::text,
+                            'moving_inverse', a.aggminvtransfn::regprocedure::text,
+                            'moving_final', a.aggmfinalfn::regprocedure::text,
+                            'sort', a.aggsortop::regoperator::text,
+                            'transition_type', a.aggtranstype::regtype::text,
+                            'moving_type', a.aggmtranstype::regtype::text,
+                            'properties', to_jsonb(a) - ARRAY['aggfnoid','aggtransfn','aggfinalfn',
+                              'aggcombinefn','aggserialfn','aggdeserialfn','aggmtransfn','aggminvtransfn',
+                              'aggmfinalfn','aggsortop','aggtranstype','aggmtranstype'])::text
+                            FROM pg_aggregate a WHERE a.aggfnoid=p.oid) END
+                        FROM pg_proc p WHERE p.oid=d.objid)
+                    WHEN d.classid='pg_operator'::regclass THEN (
+                        SELECT o.oprcode::regprocedure::text FROM pg_operator o WHERE o.oid=d.objid)
+                    ELSE NULL END AS definition
+        FROM pg_depend d JOIN pg_extension e ON e.oid=d.refobjid
+        WHERE d.refclassid='pg_extension'::regclass AND d.deptype='e' AND e.extname='vector'
+        ORDER BY pg_describe_object(d.classid,d.objid,d.objsubid) COLLATE "C"
+    """)).mappings()]
+
+
+def validate_vector_catalog(connection):
+    try:
+        path = LEGACY_CATALOG_PATH.with_name("vector-0.8.7.json")
+        expected = json.loads(path.read_bytes(), object_pairs_hook=_pairs)
+        _require(expected == capture_vector_catalog(connection))
+    except SiteBackupError:
+        raise
+    except Exception:
+        raise SiteBackupError("backup_schema_invalid") from None
+
+
+def capture_learning_guards(connection):
+    """Public routines except the separately pinned vector members, plus triggers.
+
+    A routine attached to another allowed extension (such as plpgsql) is still
+    an unexpected application-schema object. Do not let membership hide it.
+    """
+    routines = [dict(row) for row in connection.execute(text("""
+        SELECT p.oid::regprocedure::text AS identity, pg_get_functiondef(p.oid) AS definition
+        FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+        WHERE n.nspname='public' AND NOT EXISTS (
+            SELECT 1 FROM pg_depend d JOIN pg_extension e ON e.oid=d.refobjid
+            WHERE d.classid='pg_proc'::regclass AND d.refclassid='pg_extension'::regclass
+            AND d.objid=p.oid AND d.deptype='e' AND e.extname='vector')
+        ORDER BY p.oid::regprocedure::text COLLATE "C"
+    """)).mappings()]
+    triggers = [dict(row) for row in connection.execute(text("""
+        SELECT c.relname AS table_name, t.tgname AS name, t.tgenabled AS enabled,
+               pg_get_triggerdef(t.oid, true) AS definition
+        FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid
+        JOIN pg_namespace n ON n.oid=c.relnamespace
+        WHERE n.nspname='public' AND NOT t.tgisinternal
+        ORDER BY c.relname COLLATE "C", t.tgname COLLATE "C"
+    """)).mappings()]
+    return {"routines": routines, "triggers": triggers}
+
+
+def validate_learning_guards(connection, revision):
+    try:
+        _require(revision in FROZEN_TABLE_NAMES and "review_logs" in FROZEN_TABLE_NAMES[revision])
+        path = LEGACY_CATALOG_PATH.with_name(f"{revision}-guards.json")
+        expected = json.loads(path.read_bytes(), object_pairs_hook=_pairs)
+        _require(isinstance(expected, dict) and set(expected) == {"routines", "triggers"})
+        _require(expected == capture_learning_guards(connection))
+    except SiteBackupError:
+        raise
+    except Exception:
+        raise SiteBackupError("backup_schema_invalid") from None
 
 
 def legacy_catalog():
@@ -232,6 +358,69 @@ def validate_legacy_schema(connection):
         document = legacy_catalog()
         _require(set(inspect(connection).get_table_names(schema="public")) == LEGACY_TABLE_NAMES)
         catalog = capture_catalog(connection, LEGACY_TABLE_NAMES)
+        for table, constraints in document["check_sqltext_variants"].items():
+            for check in catalog[table]["check_constraints"]:
+                pair = constraints.get(check.get("name"))
+                if pair is not None and check.get("sqltext") in pair:
+                    check["sqltext"] = pair[0]
+        _require(catalog == document["catalog"])
+    except SiteBackupError:
+        raise
+    except Exception:
+        raise SiteBackupError("backup_schema_invalid") from None
+
+
+def frozen_catalog(revision):
+    """Independent, migration-only schema evidence for supported newer heads."""
+    try:
+        _require(revision in FROZEN_TABLE_NAMES)
+        path = LEGACY_CATALOG_PATH.with_name(f"{revision}.json")
+        raw = path.read_bytes()
+        _require(len(raw) <= 1024 * 1024)
+        document = json.loads(raw, object_pairs_hook=_pairs)
+        _require(isinstance(document, dict) and set(document) == _CATALOG_FIELDS)
+        _require(type(document["format_version"]) is int and document["format_version"] == 1
+                 and document["revision"] == revision
+                 and type(document["postgres_major"]) is int and document["postgres_major"] == 16)
+        names = FROZEN_TABLE_NAMES[revision]
+        _require(document["tables"] == sorted(names)
+                 and isinstance(document["catalog"], dict) and set(document["catalog"]) == names)
+        _require(all(isinstance(table, dict) and set(table) == _TABLE_FIELDS
+                     for table in document["catalog"].values()))
+        variants = document["check_sqltext_variants"]
+        checks = (_QUIZ_RESTORED_CHECKS if revision in {QUIZ_REVISION, REMINDER_REVISION, EVENT_REVISION} else
+                  _REVIEW_RESTORED_CHECKS if revision == REVIEW_REVISION else
+                  _CARD_RESTORED_CHECKS if revision == CARD_REVISION else
+                  _SEMANTIC_RESTORED_CHECKS if revision == SEMANTIC_REVISION else _FROZEN_RESTORED_CHECKS)
+        _require(isinstance(variants, dict) and set(variants) == set(checks))
+        for table, constraints in checks.items():
+            _require(isinstance(variants[table], dict) and set(variants[table]) == constraints)
+            for name in constraints:
+                pair = variants[table][name]
+                originals = [item["sqltext"] for item in document["catalog"][table]["check_constraints"]
+                             if item.get("name") == name]
+                _require(len(originals) == 1 and isinstance(pair, list) and len(pair) == 2
+                         and all(isinstance(value, str) and bool(value) for value in pair)
+                         and len(set(pair)) == 2 and pair[0] == originals[0])
+        sources = document["migration_sources_sha256_lf"]
+        _require(isinstance(sources, dict) and bool(sources)
+                 and all(isinstance(name, str) and re.fullmatch(r"[0-9a-z_]+\.py", name)
+                         and isinstance(digest, str) and re.fullmatch(r"[0-9a-f]{64}", digest)
+                         for name, digest in sources.items()))
+        return document
+    except SiteBackupError:
+        raise
+    except Exception:
+        raise SiteBackupError("backup_schema_invalid") from None
+
+
+def validate_frozen_schema(connection, revision):
+    """A correct revision stamp cannot hide drifted columns, FKs or checks."""
+    try:
+        document = frozen_catalog(revision)
+        names = FROZEN_TABLE_NAMES[revision]
+        _require(set(inspect(connection).get_table_names(schema="public")) == names)
+        catalog = capture_catalog(connection, names)
         for table, constraints in document["check_sqltext_variants"].items():
             for check in catalog[table]["check_constraints"]:
                 pair = constraints.get(check.get("name"))

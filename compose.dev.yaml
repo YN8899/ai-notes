@@ -3,7 +3,8 @@
 name: ai-notes-dev
 services:
   db:
-    image: postgres:16.8-alpine
+    image: ai-notes-postgres:local
+    build: ./ops/postgres
     environment:
       POSTGRES_USER: ${POSTGRES_USER:?configure .local/postgres.env first}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?configure database password}

@@ -210,12 +210,75 @@ class ExportVerifierTests(unittest.TestCase):
             self.reject("metadata_too_large")
 
     def test_unsupported_version_and_unsafe_processing_are_rejected(self):
-        self.write(manifest_change=lambda value: value.update(version=2))
+        self.write(manifest_change=lambda value: value.update(version=4))
         self.reject("unsupported_format")
         self.write(manifest_change=lambda value: value.update(version=True))
         self.reject("unsupported_format")
         self.write(manifest_change=lambda value: value.update(resume_processing=True))
         self.reject("unsafe_processing_state")
+
+    def test_v1_keeps_exact_legacy_collection_contract(self):
+        tables = {name: rows for name, rows in self.tables.items() if name in verifier.V1_TABLES}
+        self.write(tables=tables, manifest_change=lambda manifest: manifest.update(version=1))
+        self.assertEqual(set(verifier.verify_archive(self.archive)), set(verifier.V1_TABLES))
+        self.write(manifest_change=lambda manifest: manifest.update(version=1))
+        self.reject("invalid_collections")
+
+    def test_v2_keeps_ocr_and_excludes_v3_learning_collections(self):
+        tables={name:rows for name,rows in self.tables.items() if name in verifier.V2_TABLES}
+        self.write(tables=tables,manifest_change=lambda manifest:manifest.update(version=2))
+        self.assertEqual(set(verifier.verify_archive(self.archive)),set(verifier.V2_TABLES))
+        self.write(manifest_change=lambda manifest:manifest.update(version=2))
+        self.reject('invalid_collections')
+
+    def ocr(self):
+        self.tables["notes"][0]["kind"] = "image"
+        self.tables["ai_runs"][0]["status"] = "succeeded"
+        self.tables["ai_runs"][0]["source"]["pages"][0]["page_revision"] = 1
+        row = {"id": identity(16), "owner_id": self.owner,
+               "created_at": "2026-10-31T00:00:00Z", "updated_at": "2026-10-31T00:00:01Z",
+               "note_id": identity(5), "page_id": identity(10), "file_id": identity(8), "run_id": identity(13),
+               "source_sha256": None, "source_width": 100, "source_height": 80,
+               "corrected_text": "人工纠错 $x^2$", "reviewed": True, "revision": 2}
+        self.tables["ocr_documents"].append(row)
+        return row
+
+    def test_v2_preserves_ocr_corrections_and_historical_removed_page(self):
+        self.ocr()
+        # Remove the ordinary saved-note reference: only OCR supports missing
+        # historical pages. Its owned file/reading payload must still exist.
+        self.tables["ai_saved_notes"] = []
+        self.tables["note_pages"] = []
+        self.write()
+        self.assertEqual(verifier.verify_archive(self.archive)["ocr_documents"], 1)
+
+    def test_ocr_rejects_foreign_missing_malformed_and_internal_metadata(self):
+        row = self.ocr()
+        cases = [("owner_id", identity(999)), ("file_id", identity(999)), ("run_id", identity(999)),
+                 ("page_id", identity(999)), ("revision", True), ("reviewed", 1),
+                 ("source_sha256", "bad"), ("source_width", -1), ("source_height", None),
+                 ("corrected_text", "x" * 64001), ("corrected_text", None), ("corrected_text", "a\x00b"),
+                 ("request_hash", "internal"), ("created_at", "2026-01-01")]
+        for field, value in cases:
+            with self.subTest(field=field):
+                previous = dict(row)
+                row[field] = value
+                self.write()
+                self.reject()
+                row.clear()
+                row.update(previous)
+        self.tables["ai_runs"][0]["status"] = "running"
+        self.write()
+        self.reject("unsafe_processing_state")
+
+    def test_historical_ocr_exception_does_not_weaken_ordinary_saved_sources(self):
+        self.ocr()
+        self.tables["note_pages"] = []
+        # IDs from distinct tables may collide. A saved-note ID equal to an
+        # OCR run ID must never inherit that run's historical-page exception.
+        self.tables["ai_saved_notes"][0]["id"] = identity(13)
+        self.write()
+        self.reject("missing_reference")
 
     def test_counts_owner_and_duplicate_rows_are_rejected(self):
         self.write(manifest_change=lambda value: value["counts"].update(notes=99))

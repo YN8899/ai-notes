@@ -1,0 +1,938 @@
+[
+  {
+    "definition": null,
+    "identity": "access method hnsw"
+  },
+  {
+    "definition": null,
+    "identity": "access method ivfflat"
+  },
+  {
+    "definition": null,
+    "identity": "cast from double precision[] to halfvec"
+  },
+  {
+    "definition": null,
+    "identity": "cast from double precision[] to sparsevec"
+  },
+  {
+    "definition": null,
+    "identity": "cast from double precision[] to vector"
+  },
+  {
+    "definition": null,
+    "identity": "cast from halfvec to halfvec"
+  },
+  {
+    "definition": null,
+    "identity": "cast from halfvec to real[]"
+  },
+  {
+    "definition": null,
+    "identity": "cast from halfvec to sparsevec"
+  },
+  {
+    "definition": null,
+    "identity": "cast from halfvec to vector"
+  },
+  {
+    "definition": null,
+    "identity": "cast from integer[] to halfvec"
+  },
+  {
+    "definition": null,
+    "identity": "cast from integer[] to sparsevec"
+  },
+  {
+    "definition": null,
+    "identity": "cast from integer[] to vector"
+  },
+  {
+    "definition": null,
+    "identity": "cast from numeric[] to halfvec"
+  },
+  {
+    "definition": null,
+    "identity": "cast from numeric[] to sparsevec"
+  },
+  {
+    "definition": null,
+    "identity": "cast from numeric[] to vector"
+  },
+  {
+    "definition": null,
+    "identity": "cast from real[] to halfvec"
+  },
+  {
+    "definition": null,
+    "identity": "cast from real[] to sparsevec"
+  },
+  {
+    "definition": null,
+    "identity": "cast from real[] to vector"
+  },
+  {
+    "definition": null,
+    "identity": "cast from sparsevec to halfvec"
+  },
+  {
+    "definition": null,
+    "identity": "cast from sparsevec to sparsevec"
+  },
+  {
+    "definition": null,
+    "identity": "cast from sparsevec to vector"
+  },
+  {
+    "definition": null,
+    "identity": "cast from vector to halfvec"
+  },
+  {
+    "definition": null,
+    "identity": "cast from vector to real[]"
+  },
+  {
+    "definition": null,
+    "identity": "cast from vector to sparsevec"
+  },
+  {
+    "definition": null,
+    "identity": "cast from vector to vector"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.array_to_halfvec(double precision[], integer, boolean)\n RETURNS halfvec\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/vector', $function$array_to_halfvec$function$\n",
+    "identity": "function array_to_halfvec(double precision[],integer,boolean)"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.array_to_halfvec(integer[], integer, boolean)\n RETURNS halfvec\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/vector', $function$array_to_halfvec$function$\n",
+    "identity": "function array_to_halfvec(integer[],integer,boolean)"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.array_to_halfvec(numeric[], integer, boolean)\n RETURNS halfvec\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/vector', $function$array_to_halfvec$function$\n",
+    "identity": "function array_to_halfvec(numeric[],integer,boolean)"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.array_to_halfvec(real[], integer, boolean)\n RETURNS halfvec\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/vector', $function$array_to_halfvec$function$\n",
+    "identity": "function array_to_halfvec(real[],integer,boolean)"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.array_to_sparsevec(double precision[], integer, boolean)\n RETURNS sparsevec\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/vector', $function$array_to_sparsevec$function$\n",
+    "identity": "function array_to_sparsevec(double precision[],integer,boolean)"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.array_to_sparsevec(integer[], integer, boolean)\n RETURNS sparsevec\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/vector', $function$array_to_sparsevec$function$\n",
+    "identity": "function array_to_sparsevec(integer[],integer,boolean)"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.array_to_sparsevec(numeric[], integer, boolean)\n RETURNS sparsevec\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/vector', $function$array_to_sparsevec$function$\n",
+    "identity": "function array_to_sparsevec(numeric[],integer,boolean)"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.array_to_sparsevec(real[], integer, boolean)\n RETURNS sparsevec\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/vector', $function$array_to_sparsevec$function$\n",
+    "identity": "function array_to_sparsevec(real[],integer,boolean)"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.array_to_vector(double precision[], integer, boolean)\n RETURNS vector\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/vector', $function$array_to_vector$function$\n",
+    "identity": "function array_to_vector(double precision[],integer,boolean)"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.array_to_vector(integer[], integer, boolean)\n RETURNS vector\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/vector', $function$array_to_vector$function$\n",
+    "identity": "function array_to_vector(integer[],integer,boolean)"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.array_to_vector(numeric[], integer, boolean)\n RETURNS vector\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/vector', $function$array_to_vector$function$\n",
+    "identity": "function array_to_vector(numeric[],integer,boolean)"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.array_to_vector(real[], integer, boolean)\n RETURNS vector\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/vector', $function$array_to_vector$function$\n",
+    "identity": "function array_to_vector(real[],integer,boolean)"
+  },
+  {
+    "definition": "{\"sort\": \"0\", \"final\": \"halfvec_avg(double precision[])\", \"serial\": \"-\", \"combine\": \"halfvec_combine(double precision[],double precision[])\", \"deserial\": \"-\", \"properties\": {\"aggkind\": \"n\", \"agginitval\": \"{0}\", \"aggminitval\": null, \"aggfinalextra\": false, \"aggtransspace\": 0, \"aggfinalmodify\": \"r\", \"aggmfinalextra\": false, \"aggmtransspace\": 0, \"aggmfinalmodify\": \"r\", \"aggnumdirectargs\": 0}, \"transition\": \"halfvec_accum(double precision[],halfvec)\", \"moving_type\": \"-\", \"moving_final\": \"-\", \"moving_inverse\": \"-\", \"transition_type\": \"double precision[]\", \"moving_transition\": \"-\"}",
+    "identity": "function avg(halfvec)"
+  },
+  {
+    "definition": "{\"sort\": \"0\", \"final\": \"vector_avg(double precision[])\", \"serial\": \"-\", \"combine\": \"vector_combine(double precision[],double precision[])\", \"deserial\": \"-\", \"properties\": {\"aggkind\": \"n\", \"agginitval\": \"{0}\", \"aggminitval\": null, \"aggfinalextra\": false, \"aggtransspace\": 0, \"aggfinalmodify\": \"r\", \"aggmfinalextra\": false, \"aggmtransspace\": 0, \"aggmfinalmodify\": \"r\", \"aggnumdirectargs\": 0}, \"transition\": \"vector_accum(double precision[],vector)\", \"moving_type\": \"-\", \"moving_final\": \"-\", \"moving_inverse\": \"-\", \"transition_type\": \"double precision[]\", \"moving_transition\": \"-\"}",
+    "identity": "function avg(vector)"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.binary_quantize(halfvec)\n RETURNS bit\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/vector', $function$halfvec_binary_quantize$function$\n",
+    "identity": "function binary_quantize(halfvec)"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.binary_quantize(vector)\n RETURNS bit\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/vector', $function$binary_quantize$function$\n",
+    "identity": "function binary_quantize(vector)"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.cosine_distance(halfvec, halfvec)\n RETURNS double precision\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/vector', $function$halfvec_cosine_distance$function$\n",
+    "identity": "function cosine_distance(halfvec,halfvec)"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.cosine_distance(sparsevec, sparsevec)\n RETURNS double precision\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/vector', $function$sparsevec_cosine_distance$function$\n",
+    "identity": "function cosine_distance(sparsevec,sparsevec)"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.cosine_distance(vector, vector)\n RETURNS double precision\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/vector', $function$cosine_distance$function$\n",
+    "identity": "function cosine_distance(vector,vector)"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.halfvec(halfvec, integer, boolean)\n RETURNS halfvec\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/vector', $function$halfvec$function$\n",
+    "identity": "function halfvec(halfvec,integer,boolean)"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.halfvec_accum(double precision[], halfvec)\n RETURNS double precision[]\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/vector', $function$halfvec_accum$function$\n",
+    "identity": "function halfvec_accum(double precision[],halfvec)"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.halfvec_add(halfvec, halfvec)\n RETURNS halfvec\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/vector', $function$halfvec_add$function$\n",
+    "identity": "function halfvec_add(halfvec,halfvec)"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.halfvec_avg(double precision[])\n RETURNS halfvec\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/vector', $function$halfvec_avg$function$\n",
+    "identity": "function halfvec_avg(double precision[])"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.halfvec_cmp(halfvec, halfvec)\n RETURNS integer\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/vector', $function$halfvec_cmp$function$\n",
+    "identity": "function halfvec_cmp(halfvec,halfvec)"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.halfvec_combine(double precision[], double precision[])\n RETURNS double precision[]\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/vector', $function$vector_combine$function$\n",
+    "identity": "function halfvec_combine(double precision[],double precision[])"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.halfvec_concat(halfvec, halfvec)\n RETURNS halfvec\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/vector', $function$halfvec_concat$function$\n",
+    "identity": "function halfvec_concat(halfvec,halfvec)"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.halfvec_eq(halfvec, halfvec)\n RETURNS boolean\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/vector', $function$halfvec_eq$function$\n",
+    "identity": "function halfvec_eq(halfvec,halfvec)"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.halfvec_ge(halfvec, halfvec)\n RETURNS boolean\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/vector', $function$halfvec_ge$function$\n",
+    "identity": "function halfvec_ge(halfvec,halfvec)"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.halfvec_gt(halfvec, halfvec)\n RETURNS boolean\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/vector', $function$halfvec_gt$function$\n",
+    "identity": "function halfvec_gt(halfvec,halfvec)"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.halfvec_in(cstring, oid, integer)\n RETURNS halfvec\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/vector', $function$halfvec_in$function$\n",
+    "identity": "function halfvec_in(cstring,oid,integer)"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.halfvec_l2_squared_distance(halfvec, halfvec)\n RETURNS double precision\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/vector', $function$halfvec_l2_squared_distance$function$\n",
+    "identity": "function halfvec_l2_squared_distance(halfvec,halfvec)"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.halfvec_le(halfvec, halfvec)\n RETURNS boolean\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/vector', $function$halfvec_le$function$\n",
+    "identity": "function halfvec_le(halfvec,halfvec)"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.halfvec_lt(halfvec, halfvec)\n RETURNS boolean\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/vector', $function$halfvec_lt$function$\n",
+    "identity": "function halfvec_lt(halfvec,halfvec)"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.halfvec_mul(halfvec, halfvec)\n RETURNS halfvec\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/vector', $function$halfvec_mul$function$\n",
+    "identity": "function halfvec_mul(halfvec,halfvec)"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.halfvec_ne(halfvec, halfvec)\n RETURNS boolean\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/vector', $function$halfvec_ne$function$\n",
+    "identity": "function halfvec_ne(halfvec,halfvec)"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.halfvec_negative_inner_product(halfvec, halfvec)\n RETURNS double precision\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/vector', $function$halfvec_negative_inner_product$function$\n",
+    "identity": "function halfvec_negative_inner_product(halfvec,halfvec)"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.halfvec_out(halfvec)\n RETURNS cstring\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/vector', $function$halfvec_out$function$\n",
+    "identity": "function halfvec_out(halfvec)"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.halfvec_recv(internal, oid, integer)\n RETURNS halfvec\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/vector', $function$halfvec_recv$function$\n",
+    "identity": "function halfvec_recv(internal,oid,integer)"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.halfvec_send(halfvec)\n RETURNS bytea\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/vector', $function$halfvec_send$function$\n",
+    "identity": "function halfvec_send(halfvec)"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.halfvec_spherical_distance(halfvec, halfvec)\n RETURNS double precision\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/vector', $function$halfvec_spherical_distance$function$\n",
+    "identity": "function halfvec_spherical_distance(halfvec,halfvec)"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.halfvec_sub(halfvec, halfvec)\n RETURNS halfvec\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/vector', $function$halfvec_sub$function$\n",
+    "identity": "function halfvec_sub(halfvec,halfvec)"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.halfvec_to_float4(halfvec, integer, boolean)\n RETURNS real[]\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/vector', $function$halfvec_to_float4$function$\n",
+    "identity": "function halfvec_to_float4(halfvec,integer,boolean)"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.halfvec_to_sparsevec(halfvec, integer, boolean)\n RETURNS sparsevec\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/vector', $function$halfvec_to_sparsevec$function$\n",
+    "identity": "function halfvec_to_sparsevec(halfvec,integer,boolean)"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.halfvec_to_vector(halfvec, integer, boolean)\n RETURNS vector\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/vector', $function$halfvec_to_vector$function$\n",
+    "identity": "function halfvec_to_vector(halfvec,integer,boolean)"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.halfvec_typmod_in(cstring[])\n RETURNS integer\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/vector', $function$halfvec_typmod_in$function$\n",
+    "identity": "function halfvec_typmod_in(cstring[])"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.hamming_distance(bit, bit)\n RETURNS double precision\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/vector', $function$hamming_distance$function$\n",
+    "identity": "function hamming_distance(bit,bit)"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.hnsw_bit_support(internal)\n RETURNS internal\n LANGUAGE c\nAS '$libdir/vector', $function$hnsw_bit_support$function$\n",
+    "identity": "function hnsw_bit_support(internal)"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.hnsw_halfvec_support(internal)\n RETURNS internal\n LANGUAGE c\nAS '$libdir/vector', $function$hnsw_halfvec_support$function$\n",
+    "identity": "function hnsw_halfvec_support(internal)"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.hnsw_sparsevec_support(internal)\n RETURNS internal\n LANGUAGE c\nAS '$libdir/vector', $function$hnsw_sparsevec_support$function$\n",
+    "identity": "function hnsw_sparsevec_support(internal)"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.hnswhandler(internal)\n RETURNS index_am_handler\n LANGUAGE c\nAS '$libdir/vector', $function$hnswhandler$function$\n",
+    "identity": "function hnswhandler(internal)"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.inner_product(halfvec, halfvec)\n RETURNS double precision\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/vector', $function$halfvec_inner_product$function$\n",
+    "identity": "function inner_product(halfvec,halfvec)"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.inner_product(sparsevec, sparsevec)\n RETURNS double precision\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/vector', $function$sparsevec_inner_product$function$\n",
+    "identity": "function inner_product(sparsevec,sparsevec)"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.inner_product(vector, vector)\n RETURNS double precision\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/vector', $function$inner_product$function$\n",
+    "identity": "function inner_product(vector,vector)"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.ivfflat_bit_support(internal)\n RETURNS internal\n LANGUAGE c\nAS '$libdir/vector', $function$ivfflat_bit_support$function$\n",
+    "identity": "function ivfflat_bit_support(internal)"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.ivfflat_halfvec_support(internal)\n RETURNS internal\n LANGUAGE c\nAS '$libdir/vector', $function$ivfflat_halfvec_support$function$\n",
+    "identity": "function ivfflat_halfvec_support(internal)"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.ivfflathandler(internal)\n RETURNS index_am_handler\n LANGUAGE c\nAS '$libdir/vector', $function$ivfflathandler$function$\n",
+    "identity": "function ivfflathandler(internal)"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.jaccard_distance(bit, bit)\n RETURNS double precision\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/vector', $function$jaccard_distance$function$\n",
+    "identity": "function jaccard_distance(bit,bit)"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.l1_distance(halfvec, halfvec)\n RETURNS double precision\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/vector', $function$halfvec_l1_distance$function$\n",
+    "identity": "function l1_distance(halfvec,halfvec)"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.l1_distance(sparsevec, sparsevec)\n RETURNS double precision\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/vector', $function$sparsevec_l1_distance$function$\n",
+    "identity": "function l1_distance(sparsevec,sparsevec)"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.l1_distance(vector, vector)\n RETURNS double precision\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/vector', $function$l1_distance$function$\n",
+    "identity": "function l1_distance(vector,vector)"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.l2_distance(halfvec, halfvec)\n RETURNS double precision\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/vector', $function$halfvec_l2_distance$function$\n",
+    "identity": "function l2_distance(halfvec,halfvec)"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.l2_distance(sparsevec, sparsevec)\n RETURNS double precision\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/vector', $function$sparsevec_l2_distance$function$\n",
+    "identity": "function l2_distance(sparsevec,sparsevec)"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.l2_distance(vector, vector)\n RETURNS double precision\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/vector', $function$l2_distance$function$\n",
+    "identity": "function l2_distance(vector,vector)"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.l2_norm(halfvec)\n RETURNS double precision\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/vector', $function$halfvec_l2_norm$function$\n",
+    "identity": "function l2_norm(halfvec)"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.l2_norm(sparsevec)\n RETURNS double precision\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/vector', $function$sparsevec_l2_norm$function$\n",
+    "identity": "function l2_norm(sparsevec)"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.l2_normalize(halfvec)\n RETURNS halfvec\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/vector', $function$halfvec_l2_normalize$function$\n",
+    "identity": "function l2_normalize(halfvec)"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.l2_normalize(sparsevec)\n RETURNS sparsevec\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/vector', $function$sparsevec_l2_normalize$function$\n",
+    "identity": "function l2_normalize(sparsevec)"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.l2_normalize(vector)\n RETURNS vector\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/vector', $function$l2_normalize$function$\n",
+    "identity": "function l2_normalize(vector)"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.sparsevec(sparsevec, integer, boolean)\n RETURNS sparsevec\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/vector', $function$sparsevec$function$\n",
+    "identity": "function sparsevec(sparsevec,integer,boolean)"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.sparsevec_cmp(sparsevec, sparsevec)\n RETURNS integer\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/vector', $function$sparsevec_cmp$function$\n",
+    "identity": "function sparsevec_cmp(sparsevec,sparsevec)"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.sparsevec_eq(sparsevec, sparsevec)\n RETURNS boolean\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/vector', $function$sparsevec_eq$function$\n",
+    "identity": "function sparsevec_eq(sparsevec,sparsevec)"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.sparsevec_ge(sparsevec, sparsevec)\n RETURNS boolean\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/vector', $function$sparsevec_ge$function$\n",
+    "identity": "function sparsevec_ge(sparsevec,sparsevec)"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.sparsevec_gt(sparsevec, sparsevec)\n RETURNS boolean\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/vector', $function$sparsevec_gt$function$\n",
+    "identity": "function sparsevec_gt(sparsevec,sparsevec)"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.sparsevec_in(cstring, oid, integer)\n RETURNS sparsevec\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/vector', $function$sparsevec_in$function$\n",
+    "identity": "function sparsevec_in(cstring,oid,integer)"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.sparsevec_l2_squared_distance(sparsevec, sparsevec)\n RETURNS double precision\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/vector', $function$sparsevec_l2_squared_distance$function$\n",
+    "identity": "function sparsevec_l2_squared_distance(sparsevec,sparsevec)"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.sparsevec_le(sparsevec, sparsevec)\n RETURNS boolean\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/vector', $function$sparsevec_le$function$\n",
+    "identity": "function sparsevec_le(sparsevec,sparsevec)"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.sparsevec_lt(sparsevec, sparsevec)\n RETURNS boolean\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/vector', $function$sparsevec_lt$function$\n",
+    "identity": "function sparsevec_lt(sparsevec,sparsevec)"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.sparsevec_ne(sparsevec, sparsevec)\n RETURNS boolean\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/vector', $function$sparsevec_ne$function$\n",
+    "identity": "function sparsevec_ne(sparsevec,sparsevec)"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.sparsevec_negative_inner_product(sparsevec, sparsevec)\n RETURNS double precision\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/vector', $function$sparsevec_negative_inner_product$function$\n",
+    "identity": "function sparsevec_negative_inner_product(sparsevec,sparsevec)"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.sparsevec_out(sparsevec)\n RETURNS cstring\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/vector', $function$sparsevec_out$function$\n",
+    "identity": "function sparsevec_out(sparsevec)"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.sparsevec_recv(internal, oid, integer)\n RETURNS sparsevec\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/vector', $function$sparsevec_recv$function$\n",
+    "identity": "function sparsevec_recv(internal,oid,integer)"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.sparsevec_send(sparsevec)\n RETURNS bytea\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/vector', $function$sparsevec_send$function$\n",
+    "identity": "function sparsevec_send(sparsevec)"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.sparsevec_to_halfvec(sparsevec, integer, boolean)\n RETURNS halfvec\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/vector', $function$sparsevec_to_halfvec$function$\n",
+    "identity": "function sparsevec_to_halfvec(sparsevec,integer,boolean)"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.sparsevec_to_vector(sparsevec, integer, boolean)\n RETURNS vector\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/vector', $function$sparsevec_to_vector$function$\n",
+    "identity": "function sparsevec_to_vector(sparsevec,integer,boolean)"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.sparsevec_typmod_in(cstring[])\n RETURNS integer\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/vector', $function$sparsevec_typmod_in$function$\n",
+    "identity": "function sparsevec_typmod_in(cstring[])"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.subvector(halfvec, integer, integer)\n RETURNS halfvec\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/vector', $function$halfvec_subvector$function$\n",
+    "identity": "function subvector(halfvec,integer,integer)"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.subvector(vector, integer, integer)\n RETURNS vector\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/vector', $function$subvector$function$\n",
+    "identity": "function subvector(vector,integer,integer)"
+  },
+  {
+    "definition": "{\"sort\": \"0\", \"final\": \"-\", \"serial\": \"-\", \"combine\": \"halfvec_add(halfvec,halfvec)\", \"deserial\": \"-\", \"properties\": {\"aggkind\": \"n\", \"agginitval\": null, \"aggminitval\": null, \"aggfinalextra\": false, \"aggtransspace\": 0, \"aggfinalmodify\": \"r\", \"aggmfinalextra\": false, \"aggmtransspace\": 0, \"aggmfinalmodify\": \"r\", \"aggnumdirectargs\": 0}, \"transition\": \"halfvec_add(halfvec,halfvec)\", \"moving_type\": \"-\", \"moving_final\": \"-\", \"moving_inverse\": \"-\", \"transition_type\": \"halfvec\", \"moving_transition\": \"-\"}",
+    "identity": "function sum(halfvec)"
+  },
+  {
+    "definition": "{\"sort\": \"0\", \"final\": \"-\", \"serial\": \"-\", \"combine\": \"vector_add(vector,vector)\", \"deserial\": \"-\", \"properties\": {\"aggkind\": \"n\", \"agginitval\": null, \"aggminitval\": null, \"aggfinalextra\": false, \"aggtransspace\": 0, \"aggfinalmodify\": \"r\", \"aggmfinalextra\": false, \"aggmtransspace\": 0, \"aggmfinalmodify\": \"r\", \"aggnumdirectargs\": 0}, \"transition\": \"vector_add(vector,vector)\", \"moving_type\": \"-\", \"moving_final\": \"-\", \"moving_inverse\": \"-\", \"transition_type\": \"vector\", \"moving_transition\": \"-\"}",
+    "identity": "function sum(vector)"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.vector(vector, integer, boolean)\n RETURNS vector\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/vector', $function$vector$function$\n",
+    "identity": "function vector(vector,integer,boolean)"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.vector_accum(double precision[], vector)\n RETURNS double precision[]\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/vector', $function$vector_accum$function$\n",
+    "identity": "function vector_accum(double precision[],vector)"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.vector_add(vector, vector)\n RETURNS vector\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/vector', $function$vector_add$function$\n",
+    "identity": "function vector_add(vector,vector)"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.vector_avg(double precision[])\n RETURNS vector\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/vector', $function$vector_avg$function$\n",
+    "identity": "function vector_avg(double precision[])"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.vector_cmp(vector, vector)\n RETURNS integer\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/vector', $function$vector_cmp$function$\n",
+    "identity": "function vector_cmp(vector,vector)"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.vector_combine(double precision[], double precision[])\n RETURNS double precision[]\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/vector', $function$vector_combine$function$\n",
+    "identity": "function vector_combine(double precision[],double precision[])"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.vector_concat(vector, vector)\n RETURNS vector\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/vector', $function$vector_concat$function$\n",
+    "identity": "function vector_concat(vector,vector)"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.vector_dims(halfvec)\n RETURNS integer\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/vector', $function$halfvec_vector_dims$function$\n",
+    "identity": "function vector_dims(halfvec)"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.vector_dims(vector)\n RETURNS integer\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/vector', $function$vector_dims$function$\n",
+    "identity": "function vector_dims(vector)"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.vector_eq(vector, vector)\n RETURNS boolean\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/vector', $function$vector_eq$function$\n",
+    "identity": "function vector_eq(vector,vector)"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.vector_ge(vector, vector)\n RETURNS boolean\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/vector', $function$vector_ge$function$\n",
+    "identity": "function vector_ge(vector,vector)"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.vector_gt(vector, vector)\n RETURNS boolean\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/vector', $function$vector_gt$function$\n",
+    "identity": "function vector_gt(vector,vector)"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.vector_in(cstring, oid, integer)\n RETURNS vector\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/vector', $function$vector_in$function$\n",
+    "identity": "function vector_in(cstring,oid,integer)"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.vector_l2_squared_distance(vector, vector)\n RETURNS double precision\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/vector', $function$vector_l2_squared_distance$function$\n",
+    "identity": "function vector_l2_squared_distance(vector,vector)"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.vector_le(vector, vector)\n RETURNS boolean\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/vector', $function$vector_le$function$\n",
+    "identity": "function vector_le(vector,vector)"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.vector_lt(vector, vector)\n RETURNS boolean\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/vector', $function$vector_lt$function$\n",
+    "identity": "function vector_lt(vector,vector)"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.vector_mul(vector, vector)\n RETURNS vector\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/vector', $function$vector_mul$function$\n",
+    "identity": "function vector_mul(vector,vector)"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.vector_ne(vector, vector)\n RETURNS boolean\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/vector', $function$vector_ne$function$\n",
+    "identity": "function vector_ne(vector,vector)"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.vector_negative_inner_product(vector, vector)\n RETURNS double precision\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/vector', $function$vector_negative_inner_product$function$\n",
+    "identity": "function vector_negative_inner_product(vector,vector)"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.vector_norm(vector)\n RETURNS double precision\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/vector', $function$vector_norm$function$\n",
+    "identity": "function vector_norm(vector)"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.vector_out(vector)\n RETURNS cstring\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/vector', $function$vector_out$function$\n",
+    "identity": "function vector_out(vector)"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.vector_recv(internal, oid, integer)\n RETURNS vector\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/vector', $function$vector_recv$function$\n",
+    "identity": "function vector_recv(internal,oid,integer)"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.vector_send(vector)\n RETURNS bytea\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/vector', $function$vector_send$function$\n",
+    "identity": "function vector_send(vector)"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.vector_spherical_distance(vector, vector)\n RETURNS double precision\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/vector', $function$vector_spherical_distance$function$\n",
+    "identity": "function vector_spherical_distance(vector,vector)"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.vector_sub(vector, vector)\n RETURNS vector\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/vector', $function$vector_sub$function$\n",
+    "identity": "function vector_sub(vector,vector)"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.vector_to_float4(vector, integer, boolean)\n RETURNS real[]\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/vector', $function$vector_to_float4$function$\n",
+    "identity": "function vector_to_float4(vector,integer,boolean)"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.vector_to_halfvec(vector, integer, boolean)\n RETURNS halfvec\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/vector', $function$vector_to_halfvec$function$\n",
+    "identity": "function vector_to_halfvec(vector,integer,boolean)"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.vector_to_sparsevec(vector, integer, boolean)\n RETURNS sparsevec\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/vector', $function$vector_to_sparsevec$function$\n",
+    "identity": "function vector_to_sparsevec(vector,integer,boolean)"
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.vector_typmod_in(cstring[])\n RETURNS integer\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/vector', $function$vector_typmod_in$function$\n",
+    "identity": "function vector_typmod_in(cstring[])"
+  },
+  {
+    "definition": "halfvec_mul(halfvec,halfvec)",
+    "identity": "operator *(halfvec,halfvec)"
+  },
+  {
+    "definition": "vector_mul(vector,vector)",
+    "identity": "operator *(vector,vector)"
+  },
+  {
+    "definition": "halfvec_add(halfvec,halfvec)",
+    "identity": "operator +(halfvec,halfvec)"
+  },
+  {
+    "definition": "vector_add(vector,vector)",
+    "identity": "operator +(vector,vector)"
+  },
+  {
+    "definition": "halfvec_sub(halfvec,halfvec)",
+    "identity": "operator -(halfvec,halfvec)"
+  },
+  {
+    "definition": "vector_sub(vector,vector)",
+    "identity": "operator -(vector,vector)"
+  },
+  {
+    "definition": "halfvec_negative_inner_product(halfvec,halfvec)",
+    "identity": "operator <#>(halfvec,halfvec)"
+  },
+  {
+    "definition": "sparsevec_negative_inner_product(sparsevec,sparsevec)",
+    "identity": "operator <#>(sparsevec,sparsevec)"
+  },
+  {
+    "definition": "vector_negative_inner_product(vector,vector)",
+    "identity": "operator <#>(vector,vector)"
+  },
+  {
+    "definition": "jaccard_distance(bit,bit)",
+    "identity": "operator <%>(bit,bit)"
+  },
+  {
+    "definition": "halfvec_lt(halfvec,halfvec)",
+    "identity": "operator <(halfvec,halfvec)"
+  },
+  {
+    "definition": "sparsevec_lt(sparsevec,sparsevec)",
+    "identity": "operator <(sparsevec,sparsevec)"
+  },
+  {
+    "definition": "vector_lt(vector,vector)",
+    "identity": "operator <(vector,vector)"
+  },
+  {
+    "definition": "l1_distance(halfvec,halfvec)",
+    "identity": "operator <+>(halfvec,halfvec)"
+  },
+  {
+    "definition": "l1_distance(sparsevec,sparsevec)",
+    "identity": "operator <+>(sparsevec,sparsevec)"
+  },
+  {
+    "definition": "l1_distance(vector,vector)",
+    "identity": "operator <+>(vector,vector)"
+  },
+  {
+    "definition": "l2_distance(halfvec,halfvec)",
+    "identity": "operator <->(halfvec,halfvec)"
+  },
+  {
+    "definition": "l2_distance(sparsevec,sparsevec)",
+    "identity": "operator <->(sparsevec,sparsevec)"
+  },
+  {
+    "definition": "l2_distance(vector,vector)",
+    "identity": "operator <->(vector,vector)"
+  },
+  {
+    "definition": "halfvec_le(halfvec,halfvec)",
+    "identity": "operator <=(halfvec,halfvec)"
+  },
+  {
+    "definition": "sparsevec_le(sparsevec,sparsevec)",
+    "identity": "operator <=(sparsevec,sparsevec)"
+  },
+  {
+    "definition": "vector_le(vector,vector)",
+    "identity": "operator <=(vector,vector)"
+  },
+  {
+    "definition": "cosine_distance(halfvec,halfvec)",
+    "identity": "operator <=>(halfvec,halfvec)"
+  },
+  {
+    "definition": "cosine_distance(sparsevec,sparsevec)",
+    "identity": "operator <=>(sparsevec,sparsevec)"
+  },
+  {
+    "definition": "cosine_distance(vector,vector)",
+    "identity": "operator <=>(vector,vector)"
+  },
+  {
+    "definition": "halfvec_ne(halfvec,halfvec)",
+    "identity": "operator <>(halfvec,halfvec)"
+  },
+  {
+    "definition": "sparsevec_ne(sparsevec,sparsevec)",
+    "identity": "operator <>(sparsevec,sparsevec)"
+  },
+  {
+    "definition": "vector_ne(vector,vector)",
+    "identity": "operator <>(vector,vector)"
+  },
+  {
+    "definition": "hamming_distance(bit,bit)",
+    "identity": "operator <~>(bit,bit)"
+  },
+  {
+    "definition": "halfvec_eq(halfvec,halfvec)",
+    "identity": "operator =(halfvec,halfvec)"
+  },
+  {
+    "definition": "sparsevec_eq(sparsevec,sparsevec)",
+    "identity": "operator =(sparsevec,sparsevec)"
+  },
+  {
+    "definition": "vector_eq(vector,vector)",
+    "identity": "operator =(vector,vector)"
+  },
+  {
+    "definition": "halfvec_gt(halfvec,halfvec)",
+    "identity": "operator >(halfvec,halfvec)"
+  },
+  {
+    "definition": "sparsevec_gt(sparsevec,sparsevec)",
+    "identity": "operator >(sparsevec,sparsevec)"
+  },
+  {
+    "definition": "vector_gt(vector,vector)",
+    "identity": "operator >(vector,vector)"
+  },
+  {
+    "definition": "halfvec_ge(halfvec,halfvec)",
+    "identity": "operator >=(halfvec,halfvec)"
+  },
+  {
+    "definition": "sparsevec_ge(sparsevec,sparsevec)",
+    "identity": "operator >=(sparsevec,sparsevec)"
+  },
+  {
+    "definition": "vector_ge(vector,vector)",
+    "identity": "operator >=(vector,vector)"
+  },
+  {
+    "definition": null,
+    "identity": "operator class bit_hamming_ops for access method hnsw"
+  },
+  {
+    "definition": null,
+    "identity": "operator class bit_hamming_ops for access method ivfflat"
+  },
+  {
+    "definition": null,
+    "identity": "operator class bit_jaccard_ops for access method hnsw"
+  },
+  {
+    "definition": null,
+    "identity": "operator class halfvec_cosine_ops for access method hnsw"
+  },
+  {
+    "definition": null,
+    "identity": "operator class halfvec_cosine_ops for access method ivfflat"
+  },
+  {
+    "definition": null,
+    "identity": "operator class halfvec_ip_ops for access method hnsw"
+  },
+  {
+    "definition": null,
+    "identity": "operator class halfvec_ip_ops for access method ivfflat"
+  },
+  {
+    "definition": null,
+    "identity": "operator class halfvec_l1_ops for access method hnsw"
+  },
+  {
+    "definition": null,
+    "identity": "operator class halfvec_l2_ops for access method hnsw"
+  },
+  {
+    "definition": null,
+    "identity": "operator class halfvec_l2_ops for access method ivfflat"
+  },
+  {
+    "definition": null,
+    "identity": "operator class halfvec_ops for access method btree"
+  },
+  {
+    "definition": null,
+    "identity": "operator class sparsevec_cosine_ops for access method hnsw"
+  },
+  {
+    "definition": null,
+    "identity": "operator class sparsevec_ip_ops for access method hnsw"
+  },
+  {
+    "definition": null,
+    "identity": "operator class sparsevec_l1_ops for access method hnsw"
+  },
+  {
+    "definition": null,
+    "identity": "operator class sparsevec_l2_ops for access method hnsw"
+  },
+  {
+    "definition": null,
+    "identity": "operator class sparsevec_ops for access method btree"
+  },
+  {
+    "definition": null,
+    "identity": "operator class vector_cosine_ops for access method hnsw"
+  },
+  {
+    "definition": null,
+    "identity": "operator class vector_cosine_ops for access method ivfflat"
+  },
+  {
+    "definition": null,
+    "identity": "operator class vector_ip_ops for access method hnsw"
+  },
+  {
+    "definition": null,
+    "identity": "operator class vector_ip_ops for access method ivfflat"
+  },
+  {
+    "definition": null,
+    "identity": "operator class vector_l1_ops for access method hnsw"
+  },
+  {
+    "definition": null,
+    "identity": "operator class vector_l2_ops for access method hnsw"
+  },
+  {
+    "definition": null,
+    "identity": "operator class vector_l2_ops for access method ivfflat"
+  },
+  {
+    "definition": null,
+    "identity": "operator class vector_ops for access method btree"
+  },
+  {
+    "definition": null,
+    "identity": "operator family bit_hamming_ops for access method hnsw"
+  },
+  {
+    "definition": null,
+    "identity": "operator family bit_hamming_ops for access method ivfflat"
+  },
+  {
+    "definition": null,
+    "identity": "operator family bit_jaccard_ops for access method hnsw"
+  },
+  {
+    "definition": null,
+    "identity": "operator family halfvec_cosine_ops for access method hnsw"
+  },
+  {
+    "definition": null,
+    "identity": "operator family halfvec_cosine_ops for access method ivfflat"
+  },
+  {
+    "definition": null,
+    "identity": "operator family halfvec_ip_ops for access method hnsw"
+  },
+  {
+    "definition": null,
+    "identity": "operator family halfvec_ip_ops for access method ivfflat"
+  },
+  {
+    "definition": null,
+    "identity": "operator family halfvec_l1_ops for access method hnsw"
+  },
+  {
+    "definition": null,
+    "identity": "operator family halfvec_l2_ops for access method hnsw"
+  },
+  {
+    "definition": null,
+    "identity": "operator family halfvec_l2_ops for access method ivfflat"
+  },
+  {
+    "definition": null,
+    "identity": "operator family halfvec_ops for access method btree"
+  },
+  {
+    "definition": null,
+    "identity": "operator family sparsevec_cosine_ops for access method hnsw"
+  },
+  {
+    "definition": null,
+    "identity": "operator family sparsevec_ip_ops for access method hnsw"
+  },
+  {
+    "definition": null,
+    "identity": "operator family sparsevec_l1_ops for access method hnsw"
+  },
+  {
+    "definition": null,
+    "identity": "operator family sparsevec_l2_ops for access method hnsw"
+  },
+  {
+    "definition": null,
+    "identity": "operator family sparsevec_ops for access method btree"
+  },
+  {
+    "definition": null,
+    "identity": "operator family vector_cosine_ops for access method hnsw"
+  },
+  {
+    "definition": null,
+    "identity": "operator family vector_cosine_ops for access method ivfflat"
+  },
+  {
+    "definition": null,
+    "identity": "operator family vector_ip_ops for access method hnsw"
+  },
+  {
+    "definition": null,
+    "identity": "operator family vector_ip_ops for access method ivfflat"
+  },
+  {
+    "definition": null,
+    "identity": "operator family vector_l1_ops for access method hnsw"
+  },
+  {
+    "definition": null,
+    "identity": "operator family vector_l2_ops for access method hnsw"
+  },
+  {
+    "definition": null,
+    "identity": "operator family vector_l2_ops for access method ivfflat"
+  },
+  {
+    "definition": null,
+    "identity": "operator family vector_ops for access method btree"
+  },
+  {
+    "definition": "halfvec_concat(halfvec,halfvec)",
+    "identity": "operator ||(halfvec,halfvec)"
+  },
+  {
+    "definition": "vector_concat(vector,vector)",
+    "identity": "operator ||(vector,vector)"
+  },
+  {
+    "definition": null,
+    "identity": "type halfvec"
+  },
+  {
+    "definition": null,
+    "identity": "type sparsevec"
+  },
+  {
+    "definition": null,
+    "identity": "type vector"
+  }
+]

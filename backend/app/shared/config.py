@@ -42,8 +42,25 @@ class Settings(BaseSettings):
     oss_access_key_secret: SecretStr = SecretStr("")
     oss_security_token: SecretStr = SecretStr("")
     deepseek_api_key: SecretStr = SecretStr("")
+    embedding_enabled: bool = False
+    embedding_api_key: SecretStr = SecretStr("")
+    embedding_workspace: str = ""
+    embedding_model: Literal["text-embedding-v4"] = "text-embedding-v4"
+    embedding_dimensions: Literal[64, 128, 256, 512, 768, 1024, 1536, 2048] = 1024
 
-    @field_validator("deepseek_api_key")
+    @field_validator("embedding_dimensions", mode="before")
+    @classmethod
+    def parse_embedding_dimensions(cls, value):
+        return int(value) if isinstance(value, str) and value.isascii() and value.isdigit() else value
+
+    @field_validator("embedding_workspace")
+    @classmethod
+    def validate_embedding_workspace(cls, value):
+        if value and not re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?", value):
+            raise ValueError("Embedding workspace must be a DNS label")
+        return value
+
+    @field_validator("deepseek_api_key", "embedding_api_key")
     @classmethod
     def validate_deepseek_api_key(cls, value):
         raw = value.get_secret_value()

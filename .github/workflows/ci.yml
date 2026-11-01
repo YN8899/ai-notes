@@ -8,20 +8,9 @@ permissions:
 jobs:
   verify:
     runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:16.8
-        env:
-          POSTGRES_USER: notes
-          POSTGRES_PASSWORD: notes
-          POSTGRES_DB: notes_test
-        ports: ["5432:5432"]
-        options: >-
-          --health-cmd "pg_isready -U notes -d notes_test"
-          --health-interval 3s --health-timeout 3s --health-retries 20
     env:
-      DATABASE_URL: postgresql+psycopg://notes:notes@localhost:5432/notes_test
-      TEST_DATABASE_URL: postgresql+psycopg://notes:notes@localhost:5432/notes_test
+      DATABASE_URL: postgresql+psycopg://notes:notes@localhost:55432/notes_test
+      TEST_DATABASE_URL: postgresql+psycopg://notes:notes@localhost:55432/notes_test
       APP_ORIGIN: http://testserver
       RATE_LIMIT_REQUESTS: 1000
     steps:
@@ -40,6 +29,24 @@ jobs:
           node-version: '22'
           cache: npm
           cache-dependency-path: frontend/package-lock.json
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+        with:
+          driver: docker-container
+      - name: Build the PostgreSQL vector verification image
+        uses: docker/build-push-action@v7
+        with:
+          context: ./ops/postgres
+          platforms: linux/amd64
+          push: false
+          load: true
+          tags: ai-notes-postgres:local
+          cache-from: type=gha,scope=ai-notes-postgres-linux-amd64,version=2
+          cache-to: ${{ github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && 'type=gha,scope=ai-notes-postgres-linux-amd64,mode=max,version=2' || '' }}
+      - name: Start the isolated vector test database
+        run: |
+          docker compose -f compose.test.yaml up -d --no-build --wait db
+          printf 'SITE_BACKUP_TEST_CONTAINER=%s\n' "$(docker compose -f compose.test.yaml ps -q db)" >> "$GITHUB_ENV"
       - run: pip install -r requirements-dev.lock
         working-directory: backend
       - run: |
@@ -49,8 +56,6 @@ jobs:
           alembic check
           pytest -q
         working-directory: backend
-        env:
-          SITE_BACKUP_TEST_CONTAINER: ${{ job.services.postgres.id }}
       - run: PYTHONPATH=. python scripts/export_openapi.py
         working-directory: backend
       - run: npm ci && npm run check:types && npm run build
@@ -59,10 +64,6 @@ jobs:
       - run: python -m unittest discover -s tests -p "test_*.py"
       - run: git diff --exit-code -- backend/openapi.json
       - run: cp .env.example .env && docker compose config --quiet
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
-        with:
-          driver: docker-container
       # PR builds may restore main's layers; only trusted main runs export them.
       - name: Build the backend verification image
         uses: docker/build-push-action@v7
@@ -88,3 +89,6 @@ jobs:
         run: |
           python -m unittest discover -s tests/https_fixtures -p "test_*.py"
           python scripts/verify_https_isolated.py --frontend-image ai-notes-https-validation --python-image ai-notes-https-python
+      - name: Stop the isolated test database
+        if: always()
+        run: docker compose -f compose.test.yaml down

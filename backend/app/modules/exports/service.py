@@ -6,7 +6,7 @@ import tempfile
 import time
 import uuid
 import zipfile
-from datetime import datetime
+from datetime import date, datetime
 
 from sqlalchemy import select, text
 from sqlalchemy.exc import SQLAlchemyError
@@ -17,6 +17,10 @@ from app.modules.ai.text_context import validate_snapshot
 from app.modules.files import service as files
 from app.modules.files.models import File, FileVariant, NotePage, PdfImport
 from app.modules.notes.models import Folder, Note, Notebook, NoteTag, NoteVersion, Tag
+from app.modules.search.models import OcrDocument
+from app.modules.exports.learning_archive import FIELDS as LEARNING_FIELDS, sources as learning_sources
+from app.modules.learning.models import CardGeneration
+from app.modules.learning.quiz_models import QuizGeneration, QuizGrading
 from app.shared.config import settings
 from app.shared.db import SessionLocal, utcnow
 from app.shared.errors import AppError
@@ -39,7 +43,9 @@ FIELDS = {
     AiRun: ("id", "created_at", "owner_id", "conversation_id", "model", "prompt", "answer", "status", "usage", "error_code", "finished_at", "source", "progress"),
     AiStep: ("id", "created_at", "run_id", "position", "kind", "pages", "status", "answer", "usage", "error_code"),
     AiSavedNote: ("id", "created_at", "owner_id", "run_id", "note_id", "source", "cited_page_numbers"),
+    OcrDocument: ("id", "created_at", "owner_id", "note_id", "page_id", "file_id", "run_id", "source_sha256", "source_width", "source_height", "corrected_text", "reviewed", "revision", "updated_at"),
 }
+FIELDS.update(LEARNING_FIELDS)
 
 
 def check_session(owner_id, auth_session_id):
@@ -56,8 +62,8 @@ def check_session(owner_id, auth_session_id):
 
 
 def _default(value):
-    if isinstance(value, (datetime, uuid.UUID)):
-        return value.isoformat() if isinstance(value, datetime) else str(value)
+    if isinstance(value, (date, datetime, uuid.UUID)):
+        return str(value) if isinstance(value, uuid.UUID) else value.isoformat()
     raise TypeError("unsupported_export_value")
 
 
@@ -105,7 +111,11 @@ def create_archive(owner_id, auth_session_id):
                 AiRun.status.in_(("queued", "running"))).limit(1))
             busy_upload = db.scalar(select(File.id).where(File.owner_id == owner_id,
                 File.status == "uploading").limit(1))
-            if busy_job or busy_ai or busy_upload:
+            # A finished AiRun may still await atomic draft/grade materialization.
+            # Exporting then would silently omit the member's generated content.
+            busy_learning = any(db.scalar(select(model.id).where(model.owner_id == owner_id,
+                model.status == "pending").limit(1)) for model in (CardGeneration, QuizGeneration, QuizGrading))
+            if busy_job or busy_ai or busy_upload or busy_learning:
                 raise AppError(409, "export_busy", "请等待上传、图片/PDF 处理和 AI 回复完成；过期上传请等待回收后重试")
 
             collections, internal_keys = {}, {}
@@ -145,6 +155,17 @@ def create_archive(owner_id, auth_session_id):
             owned_files = {str(f["id"]): f for f in collections["files"]}
             owned_pages = {str(p["id"]): p for p in collections["note_pages"]}
             owned_notes = {str(n["id"]): n for n in collections["notes"]}
+            ocr_runs = {str(row["run_id"]): row for row in collections["ocr_documents"]}
+            learning_runs = {}
+            for table in ('card_generations','quiz_generations'):
+                for task in collections[table]:
+                    source = task['source']
+                    if source.get('kind') in {'image','pdf'} and len(source.get('pages',[]))==1:
+                        page = source['pages'][0]
+                        learning_runs[str(task['run_id'])] = dict(note_id=source['note_id'],page_id=page['page_id'],file_id=page['file_id'])
+            for run in collections["ai_runs"]:
+                if str(run["id"]) in ocr_runs:
+                    run["prompt"] = "文字识别"
             versions = {(str(v["note_id"]), v["revision"]): v for v in collections["note_versions"]}
             reading = {}
             variant_kinds = {}
@@ -227,25 +248,46 @@ def create_archive(owner_id, auth_session_id):
                         if safe["kind"] == "image" and (len(safe["pages"]) != 1
                                 or (safe["mode"] == "region") != (safe["pages"][0].get("region") is not None)):
                             raise ValueError("invalid_image_source")
+                        historical = (ocr_runs.get(str(record["id"])) or learning_runs.get(str(record['id']))) if table == "ai_runs" else None
+                        if historical and (safe["note_id"] != str(historical["note_id"])
+                                           or len(safe["pages"]) != 1
+                                           or safe["pages"][0]["page_id"] != str(historical["page_id"])):
+                            raise ValueError("invalid_ocr_source")
                         for frozen, page in zip(source["pages"], safe["pages"], strict=True):
                             actual = owned_pages.get(page["page_id"])
-                            if not actual or str(actual["note_id"]) != safe["note_id"]:
+                            if historical:
+                                file_id = str(historical["file_id"])
+                                if actual and str(actual["note_id"]) != safe["note_id"]:
+                                    raise ValueError("foreign_historical_page")
+                            elif not actual or str(actual["note_id"]) != safe["note_id"]:
                                 raise ValueError("source_page_missing")
-                            file_id = str(actual["file_id"])
+                            else:
+                                file_id = str(actual["file_id"])
                             variant = reading.get(file_id)
                             if file_id not in owned_files or not variant:
                                 raise ValueError("source_variant_missing")
                             if (frozen.get("file_id", file_id) != file_id
                                     or frozen.get("object_key", internal_keys[(FileVariant, variant["id"])]) != internal_keys[(FileVariant, variant["id"])]
                                     or frozen.get("bytes", variant["bytes"]) != variant["bytes"]
-                                    or safe["kind"] == "pdf" and page["number"] != actual["pdf_page_number"]
-                                    or safe["kind"] == "image" and actual["pdf_page_number"] is not None):
+                                    or not historical and safe["kind"] == "pdf" and page["number"] != actual["pdf_page_number"]
+                                    or not historical and safe["kind"] == "image" and actual["pdf_page_number"] is not None):
                                 raise ValueError("source_identity_changed")
                             page["file_id"], page["reading_path"] = file_id, variant["path"]
+                            if historical and 'page_revision' in frozen:
+                                page["page_revision"] = frozen["page_revision"]
                         record["source"] = safe
                     except (TypeError, ValueError, KeyError):
                         raise _incomplete() from None
 
+            try:
+                learning_hashes = learning_sources(collections, notes=owned_notes, versions=versions, pages=owned_pages,
+                    files=owned_files, reading=reading, internal_keys=internal_keys)
+            except (TypeError, ValueError, KeyError):
+                raise _incomplete() from None
+            # Validate a learning source's frozen reading hash while packaging,
+            # before a corrupt but same-length variant can reach the browser.
+            objects = [(path,key,size,expected_sha or learning_hashes.get(path))
+                       for path,key,size,expected_sha in objects]
             checkpoint()
             data = _json({"collections": collections})
             if len(data) > cfg.export_max_metadata_bytes:
@@ -292,7 +334,7 @@ def create_archive(owner_id, auth_session_id):
                     payloads.append({"path": path, "bytes": len(content), "sha256": checksum})
                     del content
                 manifest = {
-                    "format": "ai-notes-export", "version": 1, "exported_at": utcnow().isoformat(),
+                    "format": "ai-notes-export", "version": 3, "exported_at": utcnow().isoformat(),
                     "owner": owner_profile,
                     "counts": {name: len(records) for name, records in collections.items()},
                     "resume_processing": False, "payloads": payloads,

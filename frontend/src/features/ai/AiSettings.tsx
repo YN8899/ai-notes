@@ -2,6 +2,7 @@ import { useMutation, useQuery } from '@tanstack/react-query'
 import { api, type AiCatalog, type AiConnection } from '../../api'
 import { NoteError } from '../notes/NoteError'
 import './ai.css'
+import {SemanticIndexManager} from '../search/SemanticIndexManager'
 
 const testMessages: Record<string, string> = {
   connected: '连接成功，可用模型已确认。',
@@ -21,6 +22,7 @@ export default function AiSettings({ owner, admin }: { owner: string; admin: boo
   })
 
   return <>
+    <SemanticIndexManager owner={owner}/>
     <section className="panel">
       <div className="panel-heading"><h3>共享模型服务</h3><span className="badge">成员共用</span></div>
       <p className="muted">管理员统一提供 DeepSeek 服务，所有登录成员共用，无需填写个人 API Key。</p>

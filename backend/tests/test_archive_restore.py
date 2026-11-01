@@ -5,6 +5,7 @@ Only the uniquely named database created below may be truncated or dropped.
 """
 
 import hashlib
+import copy
 import importlib.util
 import io
 import json
@@ -25,14 +26,15 @@ from sqlalchemy.orm import sessionmaker
 from PIL import Image
 
 from app.modules.ai import image_context, pdf_context
-from app.modules.ai.models import AiRun, AiSavedNote, AiStep
+from app.modules.ai.models import AiConversation, AiRun, AiSavedNote, AiStep
 from app.modules.exports import service as exports
 from app.modules.files import pdf_service, service as files
 from app.modules.files.models import File, FileVariant, NotePage, PdfImport
 from app.modules.notes import service as notes
 from app.modules.notes.models import Folder, Note, NoteVersion
+from app.modules.search.models import OcrDocument
 from app.shared.config import settings
-from app.shared.db import Base, SessionLocal, engine
+from app.shared.db import Base, SessionLocal, engine, utcnow
 from app.shared.models import AuthSession, Job, User
 from app.shared.security import verify_password
 from test_exports import account as export_account
@@ -242,6 +244,112 @@ def _metadata(path):
         return json.loads(archive.read("manifest.json")), json.loads(archive.read("data.json"))["collections"]
 
 
+def _rewrite_archive(source, destination, change):
+    with zipfile.ZipFile(source) as archive:
+        payloads = {name: archive.read(name) for name in archive.namelist()}
+    manifest, data = json.loads(payloads["manifest.json"]), json.loads(payloads["data.json"])
+    change(manifest, data["collections"])
+    payloads["data.json"] = json.dumps(data, ensure_ascii=False).encode()
+    manifest["counts"] = {name: len(rows) for name, rows in data["collections"].items()}
+    for item in manifest["payloads"]:
+        if item["path"] == "data.json":
+            item.update(bytes=len(payloads["data.json"]), sha256=hashlib.sha256(payloads["data.json"]).hexdigest())
+    payloads["manifest.json"] = json.dumps(manifest).encode()
+    with zipfile.ZipFile(destination, "w") as archive:
+        for name, payload in payloads.items():
+            archive.writestr(name, payload)
+
+
+@pytest.mark.parametrize("empty", [False, True])
+@pytest.mark.parametrize("version", [1, 2])
+def test_restore_legacy_v1_archive_into_current_empty_schema(restore_tool, archive_file, target, tmp_path, empty, version):
+    path = tmp_path / f"legacy-v{version}.zip"
+    def legacy(manifest, collections):
+        manifest["version"] = version
+        from app.modules.exports.learning_archive import FIELDS as learning
+        for model in learning:
+            collections.pop(model.__tablename__)
+        if version == 1:
+            collections.pop("ocr_documents")
+    _rewrite_archive(archive_file, path, legacy)
+    if empty:
+        # A real legacy empty-account package has only data.json, no assets.
+        manifest, collections = _metadata(path)
+        collections = {name: [] for name in collections}
+        raw = json.dumps({"collections": collections}).encode()
+        manifest.update(counts={name: 0 for name in collections},
+                        payloads=[{"path": "data.json", "bytes": len(raw), "sha256": hashlib.sha256(raw).hexdigest()}])
+        with zipfile.ZipFile(path, "w") as archive:
+            archive.writestr("manifest.json", json.dumps(manifest))
+            archive.writestr("data.json", raw)
+    assert ("ocr_documents" in restore_tool._load_verifier().verify_archive(path)) == (version == 2)
+    _restore(restore_tool, path, target)
+    counts = _counts(target)
+    assert counts["users"] == 1 and counts["ocr_documents"] == 0
+    assert counts["notes"] == (0 if empty else 4)
+
+
+@pytest.mark.parametrize("source_index,historical", [(1, "current"), (1, "removed"), (1, "replaced"), (0, "current")])
+def test_ocr_archive_restore_preserves_correction_frozen_source_and_no_replay(
+    restore_tool, export_account, target, tmp_path, historical, source_index,
+):
+    with SessionLocal.begin() as db:
+        original = db.get(AiRun, export_account.runs[source_index])
+        page = db.get(NotePage, export_account.pages[source_index])
+        file = db.get(File, page.file_id)
+        parent = AiConversation(owner_id=export_account.owner, title="文字识别", request_key=uuid.uuid4())
+        db.add(parent)
+        db.flush()
+        source = copy.deepcopy(original.source)
+        source["pages"][0]["page_revision"] = page.revision
+        run = AiRun(owner_id=export_account.owner, conversation_id=parent.id, request_key=uuid.uuid4(),
+                    request_hash="internal-ocr-hash", model=original.model, prompt="PRIVATE_OCR_INSTRUCTION",
+                    input_messages=[{"role": "system", "content": "PRIVATE_OCR_MESSAGES"}],
+                    source=source, answer="原识别 $x^3$", status="succeeded", finished_at=utcnow(), usage=original.usage)
+        db.add(run)
+        db.flush()
+        document = OcrDocument(owner_id=export_account.owner, note_id=page.note_id, page_id=page.id,
+                               file_id=page.file_id, run_id=run.id, request_key=uuid.uuid4(), request_hash="internal-ocr-request",
+                               source_sha256=file.sha256, source_width=file.width, source_height=file.height,
+                               corrected_text="已核对 $x^2$", reviewed=True, revision=3)
+        db.add(document)
+        db.flush()
+        document_id, run_id, old_key = document.id, run.id, document.request_key
+        if historical != "current":
+            # Ordinary AI provenance still requires live pages. Only this new
+            # OCR record carries historical page/file identity across removal.
+            saved = db.scalar(select(AiSavedNote).where(AiSavedNote.run_id == original.id))
+            saved.source, saved.cited_page_numbers = None, []
+            original.source = None
+            if historical == "removed":
+                db.delete(page)
+            else:
+                page.file_id = export_account.files[1]
+    path = tmp_path / f"ocr-{historical}.zip"
+    with exports.create_archive(export_account.owner, export_account.session) as stream, path.open("wb") as output:
+        shutil.copyfileobj(stream, output)
+    manifest, collections = _metadata(path)
+    assert manifest["version"] == 3 and len(collections["ocr_documents"]) == 1
+    with zipfile.ZipFile(path) as archive:
+        metadata = archive.read("data.json")
+    assert b"PRIVATE_OCR_INSTRUCTION" not in metadata and b"PRIVATE_OCR_MESSAGES" not in metadata
+    exported = collections["ocr_documents"][0]
+    assert "request_hash" not in exported and "request_key" not in exported
+    assert restore_tool._load_verifier().verify_archive(path)["ocr_documents"] == 1
+    _restore(restore_tool, path, target)
+    with target.sessions() as db:
+        document, run = db.get(OcrDocument, document_id), db.get(AiRun, run_id)
+        assert (document.corrected_text, document.reviewed, document.revision) == ("已核对 $x^2$", True, 3)
+        assert document.request_key != old_key and document.request_hash != "internal-ocr-request"
+        assert run.status == "succeeded" and run.answer == "原识别 $x^3$" and run.input_messages == []
+        frozen = run.source["pages"][0]
+        assert (frozen["page_id"], frozen["file_id"], frozen["page_revision"]) == (
+            str(export_account.pages[source_index]), str(export_account.files[source_index + 1]), 1)
+        if historical == "removed":
+            assert db.get(NotePage, export_account.pages[1]) is None
+        assert not db.scalar(select(Job.id))
+
+
 def test_restore_roundtrip_preserves_all_collections_assets_and_live_readers(
     restore_tool, archive_file, export_account, target, monkeypatch,
 ):
@@ -250,7 +358,7 @@ def test_restore_roundtrip_preserves_all_collections_assets_and_live_readers(
     assert result == {"owner_id": str(export_account.owner), "counts": manifest["counts"],
                       "normalized_steps": 0, "synthesized_jobs": 0, "objects": 7}
     counts = _counts(target)
-    assert len(manifest["counts"]) == 14
+    assert len(manifest["counts"]) == 32
     assert {name: counts[name] for name in TABLES} == manifest["counts"]
     assert counts["users"] == 1 and counts["upload_sessions"] == 1
     assert not any(counts[name] for name in ("sessions", "ai_credentials", "password_resets",

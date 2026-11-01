@@ -83,13 +83,26 @@ def source_text(run_id: UUID, db: DB, user: CurrentUser):
 
 @router.get("/ai/conversations", response_model=list[s.ConversationOut])
 def list_conversations(db: DB, user: CurrentUser):
+    from app.modules.search.models import OcrDocument
+    internal = select(AiRun.conversation_id).join(OcrDocument, OcrDocument.run_id == AiRun.id)
+    from app.modules.learning.models import CardGeneration
+    generations = select(AiRun.conversation_id).join(CardGeneration, CardGeneration.run_id == AiRun.id)
+    from app.modules.learning.quiz_models import QuizGeneration, QuizGrading
+    quiz_generations = select(AiRun.conversation_id).join(QuizGeneration, QuizGeneration.run_id == AiRun.id)
+    quiz_gradings = select(AiRun.conversation_id).join(QuizGrading, QuizGrading.run_id == AiRun.id)
     return list(db.scalars(select(AiConversation).where(AiConversation.owner_id == user.id)
+                           .where(AiConversation.id.not_in(quiz_generations))
+                           .where(AiConversation.id.not_in(quiz_gradings))
+                           .where(AiConversation.id.not_in(internal))
+                           .where(AiConversation.id.not_in(generations))
                            .order_by(AiConversation.created_at.desc()).limit(100)))
 
 
 @router.post("/ai/conversations", response_model=s.ConversationOut, status_code=201)
 def create_conversation(data: s.ConversationCreate, db: DB, user: CurrentUser):
     row = db.scalar(select(AiConversation).where(AiConversation.owner_id == user.id, AiConversation.request_key == data.request_key))
+    if row:
+        service.conversation(db, user.id, row.id)  # Internal task conversations remain reserved on idempotent creation too.
     if not row:
         row = AiConversation(owner_id=user.id, request_key=data.request_key)
         db.add(row)
@@ -119,6 +132,8 @@ def cancel(run_id: UUID, db: DB, user: CurrentUser):
     # current_user already holds the owner lock; use the same order as worker saves.
     row = db.scalar(select(AiRun).where(AiRun.id == run_id, AiRun.owner_id == user.id).with_for_update())
     if not row:
+        raise AppError(404, "run_not_found", "对话运行不存在")
+    if service.quiz_conversation(db, row.conversation_id):
         raise AppError(404, "run_not_found", "对话运行不存在")
     service.readable_source(row.source)
     if row.status in service.ACTIVE:

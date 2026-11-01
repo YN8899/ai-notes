@@ -66,12 +66,28 @@ def fail(job_id, worker_token, code="handler_failed"):
 
 
 def deliver_outbox():
+    from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+    from app.modules.learning.reminder_models import DailyDigest
+
     delivered = 0
+    now = utcnow()
     with SessionLocal.begin() as db:
         events = db.scalars(select(Outbox).where(Outbox.delivered_at.is_(None)).order_by(Outbox.created_at, Outbox.id).with_for_update(skip_locked=True).limit(50)).all()
         for event in events:
-            db.execute(insert(Notification).values(id=uuid4(), user_id=event.user_id, event_id=event.id, message=event.payload["message"], created_at=utcnow()).on_conflict_do_nothing(index_elements=[Notification.event_id]))
-            event.delivered_at = utcnow()
+            if event.kind == "review.daily":
+                digest = db.scalar(select(DailyDigest).where(DailyDigest.job_id == event.job_id,
+                                                            DailyDigest.owner_id == event.user_id))
+                try:
+                    current = digest is not None and now.astimezone(ZoneInfo(digest.timezone)).date() == digest.local_date
+                except (ZoneInfoNotFoundError, ValueError):
+                    current = False
+                if not current:
+                    # A committed digest can outlive its local day before delivery.
+                    # Consume stale/unattributable events without replaying old counts.
+                    event.delivered_at = now
+                    continue
+            db.execute(insert(Notification).values(id=uuid4(), user_id=event.user_id, event_id=event.id, message=event.payload["message"], created_at=now).on_conflict_do_nothing(index_elements=[Notification.event_id]))
+            event.delivered_at = now
             delivered += 1
     return delivered
 

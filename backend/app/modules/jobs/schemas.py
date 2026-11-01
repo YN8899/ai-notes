@@ -29,3 +29,4 @@ class NotificationOut(BaseModel):
     message: str
     read_at: datetime | None
     created_at: datetime
+    target: Literal['reviews'] | None = None

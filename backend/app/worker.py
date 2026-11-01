@@ -17,8 +17,10 @@ def stop(*_):
 
 def execute(job):
     log.info("job_started job_id=%s", job["id"])
-    if job["kind"] in {"image.process", "pdf.import"}:
-        if job["kind"] == "pdf.import":
+    if job["kind"] in {"image.process", "pdf.import", "semantic.build"}:
+        if job["kind"] == "semantic.build":
+            from app.modules.search.semantic_service import process_job
+        elif job["kind"] == "pdf.import":
             from app.modules.files.pdf_service import process_job
         else:
             from app.modules.files.service import process_job
@@ -65,7 +67,12 @@ def tick():
             service.fail(job["id"], job["token"])
     service.deliver_outbox()
     ai_found = ai_tick()
-    return bool(job) or ai_found
+    from app.modules.learning.card_generation import tick as cards_tick
+    cards_found = cards_tick()
+    from app.modules.learning.quiz_generation import tick as quizzes_tick
+    from app.modules.learning.quiz_grading import tick as gradings_tick
+    quizzes_found, gradings_found = quizzes_tick(), gradings_tick()
+    return bool(job) or ai_found or cards_found or quizzes_found or gradings_found
 
 
 def main():
@@ -83,6 +90,8 @@ def main():
                 from app.modules.files.service import maintenance as file_maintenance
                 service.maintenance()
                 file_maintenance()
+                from app.modules.learning.reminder_service import dispatch as daily_reminders
+                daily_reminders()
                 last_maintenance = time.monotonic()
         except Exception:
             log.warning("worker_tick_failed")

@@ -23,6 +23,11 @@ from sqlalchemy.orm import sessionmaker
 from app.modules.ai.models import AiConversation, AiCredential, AiRun, AiStep
 from app.modules.files.models import File, FileTicket, FileVariant, NotePage, UploadSession
 from app.modules.notes.models import Note
+from app.modules.search.models import OcrDocument
+from app.modules.search.semantic_models import SemanticIndex, SemanticChunk, SemanticQuery, SemanticCall
+from app.modules.learning.models import Deck, Card, CardGeneration
+from app.modules.learning.review_models import ReviewItem, ReviewPlan
+from app.modules.learning import review_service
 from app.shared.db import Base, SessionLocal, engine, utcnow
 from app.shared.models import (Audit, AuthSession, Invite, Job, Notification, Outbox,
                                RateBucket, ResetToken, User)
@@ -32,7 +37,7 @@ from test_exports import account as export_account
 
 ROOT = Path(__file__).resolve().parents[2]
 NORMALIZED_TABLES = {"sessions", "file_tickets", "password_resets", "ai_credentials",
-                     "jobs", "ai_runs", "ai_steps"}
+                     "jobs", "ai_runs", "ai_steps", "semantic_indexes", "semantic_queries", "semantic_calls", "card_generations", "quiz_generations", "quiz_gradings"}
 
 
 @pytest.fixture(scope="module")
@@ -141,6 +146,11 @@ def site_account(export_account):
         contents[frozen_key] = frozen
 
         parent_note = db.get(NotePage, fixture.pages[1]).note_id
+        ocr_file = db.get(File, fixture.files[2])
+        db.add(OcrDocument(owner_id=admin.id, note_id=parent_note, page_id=fixture.pages[1],
+                           file_id=ocr_file.id, run_id=fixture.runs[1], request_key=uuid.uuid4(),
+                           request_hash="synthetic-site-ocr-request", source_sha256=ocr_file.sha256,
+                           corrected_text="整站恢复保留的人工纠错", reviewed=True, revision=2))
         pending = File(owner_id=admin.id, object_key=f"{admin.id}/{uuid.uuid4()}/pending",
                        filename="pending.png", mime="image/png", expected_bytes=20)
         rejected = File(owner_id=admin.id, object_key=f"{admin.id}/{uuid.uuid4()}/rejected",
@@ -196,11 +206,54 @@ def site_account(export_account):
                       status="running", answer="付费调用前已落盘的部分回答")
         db.add(step)
         db.flush()
+        # Synthetic vectors and receipts: whole-site recovery preserves ready
+        # generations while never replaying an interrupted paid operation.
+        config = {"provider": "bailian", "workspace": "synthetic-space", "model": "text-embedding-v4",
+                  "dimensions": 64, "chunker": "synthetic-v1", "fingerprint": "a" * 64}
+        semantic_job = Job(owner_id=third.id, kind="semantic.build", dedupe_key="semantic-site-test",
+                           payload={}, status="running", attempts=1, max_attempts=1,
+                           lease_until=utcnow() + timedelta(minutes=1), worker_token="synthetic-token")
+        db.add(semantic_job)
+        db.flush()
+        semantic = SemanticIndex(owner_id=third.id, request_key=uuid.uuid4(), status="building", config=config,
+                                 manifest_hash="b" * 64, source_count=1, chunk_count=1, job_id=semantic_job.id)
+        db.add(semantic)
+        db.flush()
+        db.add(SemanticChunk(owner_id=third.id, index_id=semantic.id, ordinal=0, source_key="synthetic",
+                             source_hash="c" * 64, source={}, start=0, end=2, text="向量", dimensions=64,
+                             embedding=[1.0] + [0.0] * 63))
+        semantic_query = SemanticQuery(owner_id=third.id, request_key=uuid.uuid4(), request_hash="d" * 64,
+                                       index_id=semantic.id, status="running", payload={}, usage={"total_tokens": 7})
+        semantic_call = SemanticCall(index_id=semantic.id, batch=0, status="started", usage={"total_tokens": 9})
+        db.add_all([semantic_query, semantic_call])
+        active_semantic = SemanticIndex(owner_id=third.id, request_key=uuid.uuid4(), status="active", config=config,
+                                        manifest_hash="e" * 64, source_count=1, chunk_count=1, completed_chunks=1,
+                                        job_id=jobs[2].id, finished_at=utcnow())
+        db.add(active_semantic)
+        # Retain a user's edited card even after its historical image is no
+        # longer current. Its frozen object reference must still be backed up.
+        deck = Deck(owner_id=admin.id, name="备份演练卡片集")
+        db.add(deck)
+        db.flush()
+        saved_card = Card(owner_id=admin.id, deck_id=deck.id, kind="occlusion", status="confirmed",
+            front="合成遮挡题", back="人工审核的答案", payload={"masks":[{"x":0.1,"y":0.2,"width":0.3,"height":0.4}]},
+            source=run.source, revision=3)
+        pending_cards = CardGeneration(owner_id=admin.id, deck_id=deck.id, run_id=run.id,
+            request_key=uuid.uuid4(), request_hash="f"*64, kind="qa", count=1, source=run.source, status="pending")
+        db.add_all([saved_card,pending_cards])
+        db.flush()
+        review_service.ensure_card_plan(db, admin.id, saved_card)
+        card_plan = db.scalar(select(ReviewPlan).join(ReviewItem, ReviewItem.id == ReviewPlan.item_id)
+                              .where(ReviewItem.card_id == saved_card.id, ReviewPlan.owner_id == admin.id))
+        db.flush()
         result = SimpleNamespace(**vars(fixture), third=third.id, third_note=third_note.id,
                                  other_file=other_file.id, frozen_key=frozen_key,
                                  pending=pending.id, rejected=rejected.id, upload=upload.id,
                                  active_runs=[value.id for value in active_runs], step=step.id,
-                                 jobs=[value.id for value in jobs], all_contents=contents)
+                                 jobs=[value.id for value in jobs], all_contents=contents,
+                                 semantic_index=semantic.id, semantic_query=semantic_query.id,
+                                 semantic_call=semantic_call.id, active_semantic_index=active_semantic.id,
+                                 saved_card=saved_card.id, pending_cards=pending_cards.id, card_plan=card_plan.id)
     result.original_rows = _rows(engine)
     return result
 
@@ -265,6 +318,17 @@ def test_real_full_site_roundtrip_preserves_multiuser_rows_frozen_objects_and_re
         step = db.get(AiStep, site_account.step)
         assert (step.status, step.error_code) == ("failed", "site_restore_interrupted")
         assert step.answer == "付费调用前已落盘的部分回答"
+        assert db.get(SemanticIndex, site_account.semantic_index).status == "failed"
+        assert db.get(SemanticIndex, site_account.active_semantic_index).status == "active"
+        query = db.get(SemanticQuery, site_account.semantic_query)
+        assert (query.status, query.usage) == ("failed", {"total_tokens": 7})
+        call = db.get(SemanticCall, site_account.semantic_call)
+        assert (call.status, call.usage) == ("failed", {"total_tokens": 9})
+        assert db.get(Card, site_account.saved_card).revision == 3
+        assert db.get(Card, site_account.saved_card).payload["masks"][0]["width"] == 0.3
+        assert db.get(CardGeneration, site_account.pending_cards).status == "failed"
+        assert db.get(CardGeneration, site_account.pending_cards).error_code == "site_restore_interrupted"
+        assert db.get(ReviewPlan, site_account.card_plan).status == "active"
     expected = site_account.all_contents
     restored = {path.relative_to(site_target.storage_root).as_posix(): path.read_bytes()
                 for path in site_target.storage_root.rglob("*") if path.is_file()}
@@ -273,7 +337,7 @@ def test_real_full_site_roundtrip_preserves_multiuser_rows_frozen_objects_and_re
     assert result["original_fingerprints_verified"] is True
     assert result["missing_optional_objects"] == 3
     assert result["normalization"]["sessions"] == 3
-    assert result["normalization"]["jobs"] == 2
+    assert result["normalization"]["jobs"] == 3
     assert result["normalization"]["ai_runs"] == 2
     assert result["normalization"]["ai_steps"] == 1
     for name in ("ai_runs", "ai_steps", "jobs"):
@@ -312,6 +376,51 @@ def test_manifest_records_every_table_exact_object_bytes_and_known_optional_abse
     assert len(missing) == 3
     assert all(not entry["mandatory"] and entry["reason"] == "not_found_optional" for entry in missing)
     assert site_account.frozen_key in entries
+
+
+@pytest.mark.parametrize('extension',['vector','plpgsql'])
+def test_backup_rejects_unrelated_routine_hidden_as_vector_member(site_tool,extension):
+    # Extension membership alone is insufficient: the clean inventory must match.
+    with engine.begin() as connection:
+        connection.execute(text("CREATE FUNCTION public.semantic_backup_probe() RETURNS integer LANGUAGE sql AS 'SELECT 1'"))
+        connection.execute(text(f"ALTER EXTENSION {extension} ADD FUNCTION public.semantic_backup_probe()"))
+    try:
+        with engine.connect() as connection, pytest.raises(site_tool.SiteBackupError) as error:
+            site_tool._schema(connection)
+        assert error.value.code == "backup_schema_invalid"
+    finally:
+        with engine.begin() as connection:
+            connection.execute(text(f"ALTER EXTENSION {extension} DROP FUNCTION public.semantic_backup_probe()"))
+            connection.execute(text("DROP FUNCTION public.semantic_backup_probe()"))
+
+
+def test_backup_rejects_disabled_learning_history_guard(site_tool):
+    with engine.connect() as connection:
+        transaction = connection.begin()
+        try:
+            connection.execute(text("ALTER TABLE review_logs DISABLE TRIGGER review_logs_immutable"))
+            with pytest.raises(site_tool.SiteBackupError) as error:
+                site_tool._schema(connection)
+            assert error.value.code == "backup_schema_invalid"
+        finally:
+            transaction.rollback()
+
+
+@pytest.mark.parametrize("revision", ["head", "c2e41a9f3b67", "2ef16e7ca892", "7c0a9d2e4f61", "b81d4f0a6c32"])
+def test_backup_cli_accepts_every_frozen_revision(site_tool, monkeypatch, capsys, revision):
+    received = []
+    monkeypatch.setattr(sys, "argv", ["site_backup.py", "backup", "--database-url-file", "synthetic",
+        "--postgres-container", "synthetic", "--output", "synthetic", "--storage-backend", "local",
+        "--storage-root", "synthetic", "--maintenance-confirmed", "--schema-revision", revision])
+    monkeypatch.setattr(site_tool, "_database_url_file", lambda path: "synthetic")
+    monkeypatch.setattr(site_tool, "LocalBackupStorage", lambda path: object())
+    def capture(*args, **kwargs):
+        received.append(kwargs["schema_revision"])
+        return {}
+    monkeypatch.setattr(site_tool, "backup_site", capture)
+    assert site_tool._main() == 0
+    assert received == [revision]
+    assert json.loads(capsys.readouterr().out) == {"ok": True}
 
 
 @pytest.mark.parametrize("damage", ["dump", "object", "extra_file", "path_escape", "duplicate_key"])

@@ -112,3 +112,9 @@ class Notification(Entity, Base):
 from app.modules.notes import models as notes_models  # noqa: E402,F401
 from app.modules.files import models as files_models  # noqa: E402,F401
 from app.modules.ai import models as ai_models  # noqa: E402,F401
+from app.modules.search import models as search_models  # noqa: E402,F401
+from app.modules.search import semantic_models  # noqa: E402,F401
+from app.modules.learning import models as learning_models  # noqa: E402,F401
+from app.modules.learning import quiz_models, review_models  # noqa: E402,F401
+from app.modules.learning import reminder_models  # noqa: E402,F401
+from app.modules.learning import event_models  # noqa: E402,F401

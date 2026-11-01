@@ -36,7 +36,8 @@ from sqlalchemy.exc import SQLAlchemyError  # noqa: E402
 from app.shared.db import Base  # noqa: E402
 from app.shared import models as registered_models  # noqa: E402,F401
 from site_backup_support import DockerPostgres, LocalBackupStorage, OSSBackupStorage, SiteBackupError  # noqa: E402
-from site_backup_profiles import LEGACY_REVISION, LEGACY_TABLE_NAMES, validate_legacy_schema  # noqa: E402
+from site_backup_profiles import (LEGACY_REVISION, LEGACY_TABLE_NAMES, PRE_OCR_REVISION, SEMANTIC_REVISION,
+    FROZEN_TABLE_NAMES, validate_legacy_schema, validate_frozen_schema, validate_vector_catalog, validate_learning_guards)  # noqa: E402
 
 
 FORMAT_VERSION = 1
@@ -81,7 +82,11 @@ def _profile(schema_revision=None):
     chosen = current if schema_revision in (None, "head") else schema_revision
     _require(isinstance(chosen, str), "backup_schema_unsupported")
     if chosen == current:
-        return SchemaProfile(current, frozenset(TABLE_NAMES))
+        _require(current in FROZEN_TABLE_NAMES and frozenset(TABLE_NAMES) == FROZEN_TABLE_NAMES[current],
+                 "backup_schema_unsupported")
+        return SchemaProfile(current, FROZEN_TABLE_NAMES[current])
+    if chosen in FROZEN_TABLE_NAMES:
+        return SchemaProfile(chosen, FROZEN_TABLE_NAMES[chosen])
     _require(chosen == LEGACY_REVISION, "backup_schema_unsupported")
     return SchemaProfile(LEGACY_REVISION, LEGACY_TABLE_NAMES, legacy=True)
 
@@ -200,6 +205,11 @@ def _json(value):
 
 
 def _schema(connection, *, empty=False, profile=None):
+    profile = profile or _profile()
+    vector = not empty and "semantic_chunks" in profile.tables
+    if vector:
+        _require(connection.execute(text("SELECT extversion FROM pg_extension WHERE extname='vector'")).scalar_one_or_none() == "0.8.7", "backup_schema_invalid")
+        validate_vector_catalog(connection)
     schemas = connection.execute(text("SELECT nspname FROM pg_namespace WHERE nspname !~ '^pg_' AND nspname <> 'information_schema'"))
     _require({row[0] for row in schemas} == {"public"}, "backup_schema_invalid")
     inspector = inspect(connection)
@@ -208,19 +218,28 @@ def _schema(connection, *, empty=False, profile=None):
         SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
         WHERE n.nspname='public' AND c.relkind NOT IN ('r','i','t')
     """)).scalar_one()
-    routines = connection.execute(text("SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='public'" )).scalar_one()
+    routines = connection.execute(text("""SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+        WHERE n.nspname='public' AND NOT (:vector AND EXISTS (
+            SELECT 1 FROM pg_depend d JOIN pg_extension e ON e.oid=d.refobjid
+            WHERE d.classid='pg_proc'::regclass AND d.objid=p.oid AND d.deptype='e' AND e.extname='vector'))"""), {"vector": vector}).scalar_one()
     extra_types = connection.execute(text("""
         SELECT count(*) FROM pg_type t JOIN pg_namespace n ON n.oid=t.typnamespace
         WHERE n.nspname='public' AND t.typrelid=0 AND t.typelem=0
-    """)).scalar_one()
+        AND NOT (:vector AND EXISTS (SELECT 1 FROM pg_depend d JOIN pg_extension e ON e.oid=d.refobjid
+            WHERE d.classid='pg_type'::regclass AND d.objid=t.oid AND d.deptype='e' AND e.extname='vector'))
+    """), {"vector": vector}).scalar_one()
     large_objects = connection.execute(text("SELECT count(*) FROM pg_catalog.pg_largeobject_metadata")).scalar_one()
-    extensions = connection.execute(text("SELECT count(*) FROM pg_extension WHERE extname <> 'plpgsql'")).scalar_one()
+    extensions = connection.execute(text("SELECT count(*) FROM pg_extension WHERE extname <> 'plpgsql' AND NOT (:vector AND extname='vector')"), {"vector": vector}).scalar_one()
     triggers = connection.execute(text("""
         SELECT count(*) FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid
         JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND NOT t.tgisinternal
     """)).scalar_one()
+    if not empty and "review_logs" in profile.tables:
+        # Exact migration-only definitions and enabled states were frozen from
+        # a clean install. Added/modified/disabled triggers still fail closed.
+        validate_learning_guards(connection, profile.revision)
+        routines = triggers = 0
     _require(not any((unexpected, routines, extra_types, large_objects, extensions, triggers)), "backup_schema_invalid")
-    profile = profile or _profile()
     _require(not names if empty else names == profile.tables,
              "restore_target_not_empty" if empty else "backup_schema_invalid")
     if empty:
@@ -232,6 +251,8 @@ def _schema(connection, *, empty=False, profile=None):
     _require(versions == [profile.revision], "backup_schema_invalid")
     if profile.legacy:
         validate_legacy_schema(connection)
+    else:
+        validate_frozen_schema(connection, profile.revision)
     return metadata
 
 
@@ -287,15 +308,35 @@ def _references(connection, *, profile=None):
         add(row["object_key"], f"file_variants:{row['id']}", True, row["bytes"])
     if profile.legacy:
         return [objects[key] for key in sorted(objects)]
-    for row in connection.execute(text("SELECT id,source FROM public.ai_runs WHERE source IS NOT NULL ORDER BY id").execution_options(stream_results=True)).mappings():
-        source = row["source"]
+    def source_pages(source, reference):
         _require(isinstance(source, dict), "backup_schema_invalid")
         pages = source.get("pages", [])
         _require(isinstance(pages, list), "backup_schema_invalid")
         for number, page in enumerate(pages):
             _require(isinstance(page, dict), "backup_schema_invalid")
             if "object_key" in page:
-                add(page["object_key"], f"ai_runs:{row['id']}:pages:{number}", True, page.get("bytes"))
+                add(page["object_key"], f"{reference}:pages:{number}", True, page.get("bytes"))
+
+    # Fixed table/column names only. Manual content and historical attempt
+    # snapshots can be the last reference to a former reading image.
+    for table in ("ai_runs", "learning_cards", "card_generations", "quiz_questions", "quiz_generations"):
+        if table not in profile.tables:
+            continue
+        for row in connection.execute(text(f"SELECT id,source FROM public.{table} WHERE source IS NOT NULL ORDER BY id").execution_options(stream_results=True)).mappings():
+            # Optional JSONB sources may be stored as JSON null rather than
+            # SQL NULL. They contain no file reference; required generation
+            # sources still fail closed instead of silently disappearing.
+            if row['source'] is None and table in {'ai_runs','learning_cards','quiz_questions'}:
+                continue
+            source_pages(row["source"], f"{table}:{row['id']}")
+    if "quiz_attempts" in profile.tables:
+        for row in connection.execute(text("SELECT id,snapshot FROM public.quiz_attempts ORDER BY id").execution_options(stream_results=True)).mappings():
+            snapshot = row["snapshot"]
+            _require(isinstance(snapshot, list) and len(snapshot) <= 50, "backup_schema_invalid")
+            for index, question in enumerate(snapshot):
+                _require(isinstance(question, dict), "backup_schema_invalid")
+                if question.get("source") is not None:
+                    source_pages(question["source"], f"quiz_attempts:{row['id']}:snapshot:{index}")
     return [objects[key] for key in sorted(objects)]
 
 
@@ -447,7 +488,8 @@ def verify_site_backup(path):
             keys.add(key)
             refs = item["references"]
             _require(isinstance(refs, list) and 0 < len(refs) <= MAX_ROWS
-                     and all(isinstance(ref, str) and len(ref) <= 160 and re.fullmatch(r"(?:files|file_variants|ai_runs):[0-9a-f-]{36}(?::pages:[0-9]+)?", ref) for ref in refs)
+                      and all(isinstance(ref, str) and len(ref) <= 160 and re.fullmatch(r"(?:files|file_variants|ai_runs|learning_cards|card_generations|quiz_questions|quiz_generations|quiz_attempts):[0-9a-f-]{36}(?::snapshot:[0-9]+)?(?::pages:[0-9]+)?", ref)
+                              and ref.split(":", 1)[0] in profile.tables for ref in refs)
                      and len(set(refs)) == len(refs))
             if profile.legacy:
                 _require(all(re.fullmatch(r"(?:files|file_variants):[0-9a-f-]{36}", ref) for ref in refs))
@@ -543,6 +585,12 @@ def _normalize(connection, *, profile=None):
         "jobs": "UPDATE public.jobs SET status='failed',error_code='site_restore_interrupted',lease_until=NULL,worker_token=NULL WHERE status IN ('queued','running')",
         "ai_runs": "UPDATE public.ai_runs SET status='interrupted',error_code='site_restore_interrupted',lease_until=NULL,finished_at=now() WHERE status IN ('queued','running')",
         "ai_steps": "UPDATE public.ai_steps SET status='failed',error_code='site_restore_interrupted' WHERE status='running'",
+        "semantic_indexes": "UPDATE public.semantic_indexes SET status='failed',error_code='site_restore_interrupted',finished_at=now() WHERE status IN ('queued','building')",
+        "semantic_queries": "UPDATE public.semantic_queries SET status='failed',error_code='site_restore_interrupted',finished_at=now() WHERE status='running'",
+        "semantic_calls": "UPDATE public.semantic_calls SET status='failed' WHERE status='started'",
+        "card_generations": "UPDATE public.card_generations SET status='failed',error_code='site_restore_interrupted',finished_at=now() WHERE status='pending'",
+        "quiz_generations": "UPDATE public.quiz_generations SET status='failed',error_code='site_restore_interrupted',finished_at=now() WHERE status='pending'",
+        "quiz_gradings": "UPDATE public.quiz_gradings SET status='failed',error_code='site_restore_interrupted',finished_at=now() WHERE status='pending'",
     }
     return {table: connection.execute(text(statement)).rowcount for table, statement in commands.items()
             if table in profile.tables}
@@ -632,7 +680,7 @@ def _main():
     backup.add_argument("--storage-root")
     backup.add_argument("--env-file")
     backup.add_argument("--maintenance-confirmed", action="store_true")
-    backup.add_argument("--schema-revision", default="head", choices=("head", LEGACY_REVISION),
+    backup.add_argument("--schema-revision", default="head", choices=("head", LEGACY_REVISION, *FROZEN_TABLE_NAMES),
                         help="Default head; explicitly select the supported legacy source revision")
     verify = commands.add_parser("verify")
     verify.add_argument("path")

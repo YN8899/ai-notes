@@ -1,0 +1,66 @@
+import {useCallback,useEffect,useRef,useState,useSyncExternalStore} from 'react'
+import {useQuery,useQueryClient} from '@tanstack/react-query'
+import {api,ApiError} from '../../api'
+import {authSession} from '../../session'
+import {NoteError} from '../notes/NoteError'
+import {CardEditor} from './CardEditor'
+import {CardGenerations} from './CardGenerations'
+import {CardPreview,CardSource} from './CardPreview'
+import {kindNames,sourceVisual,statusNames,selectionOnPage,updatePageSelection,allPageSelected,type PageSelection,type Card,type CardList,type Deck,type DeckList,type Kind,type SourceRead} from './cards'
+import './cards.css'
+import {useLearningActivity} from './ActivityTracker'
+
+const pageSize=50
+type Props={owner:string;onOpenNote:(id:string)=>void}
+export default function CardWorkspace(props:Props){
+  const session=useSyncExternalStore(authSession.subscribe,authSession.snapshot)
+  if(session.phase!=='active'||session.owner!==props.owner)return null
+  return <Workspace key={props.owner+':'+session.id} {...props} sessionId={session.id}/>
+}
+function Workspace({owner,sessionId,onOpenNote}:Props&{sessionId:string}){
+  const client=useQueryClient(),[ticket]=useState(()=>authSession.ticket()),[deckOffset,setDeckOffset]=useState(0),[newDeck,setNewDeck]=useState(''),[deckFilter,setDeckFilter]=useState(''),[status,setStatus]=useState(''),[kind,setKind]=useState(''),[offset,setOffset]=useState(0)
+  const [selection,setSelection]=useState<PageSelection<Card>>({pageIds:[],items:[]}),[editor,setEditor]=useState<Card|'new'|null>(null),[reading,setReading]=useState(''),[showGeneration,setShowGeneration]=useState(false),[busy,setBusy]=useState(false),[error,setError]=useState<unknown>(null),[notice,setNotice]=useState('')
+  const lock=useRef(false),active=()=>authSession.current(ticket,owner)&&ticket.id===sessionId
+  const decks=useQuery({queryKey:['card-decks',owner,sessionId,deckOffset],queryFn:()=>api<DeckList>('/learning/decks?limit=50&offset='+deckOffset),retry:false})
+  const params=new URLSearchParams({limit:String(pageSize),offset:String(offset)});if(deckFilter)params.set('deck_id',deckFilter);if(status)params.set('status',status);if(kind)params.set('kind',kind)
+  const cards=useQuery({queryKey:['cards',owner,sessionId,params.toString()],queryFn:()=>api<CardList>('/learning/cards?'+params),retry:false})
+  const currentPage=cards.data?.items||[],pageMembership=currentPage.map(card=>card.id).join(';')
+  const selected=selectionOnPage(selection,currentPage).items
+  // Derive the scoped selection immediately; the effect then discards obsolete snapshots.
+  useEffect(()=>setSelection(old=>selectionOnPage(old,currentPage)),[pageMembership])
+  function setSelected(update:Card[]|((old:Card[])=>Card[])){setSelection(old=>updatePageSelection(old,currentPage,update))}
+  const refresh=useCallback(()=>{void client.invalidateQueries({queryKey:['cards',owner,sessionId]})},[client,owner,sessionId])
+  async function mutate(action:()=>Promise<unknown>,message:string){if(lock.current)return;lock.current=true;setBusy(true);setError(null);setNotice('');try{await action();if(active()){setNotice(message);setSelected([]);void client.invalidateQueries({queryKey:['card-decks',owner,sessionId]});refresh()}}catch(e){if(active())setError(e)}finally{lock.current=false;if(active())setBusy(false)}}
+  function filters(change:()=>void){change();setOffset(0);setSelected([]);setReading('');setError(null)}
+  function page(next:number){setOffset(next);setSelected([]);setReading('')}
+  function review(action:'confirm'|'archive'){const snapshot=selected.map(card=>({id:card.id,revision:card.revision}));void mutate(()=>api('/learning/cards/batch-review','POST',{action,cards:snapshot}),action==='confirm'?'整批卡片已确认，各自已建立独立复习计划，可在复习中心调整。':'整批卡片已归档，历史内容保留。')}
+  if(!active())return null
+  return <div className="card-workspace"><section className="panel"><div className="panel-heading"><div><h3>我的卡片集</h3><p className="muted">整理四类学习卡片，AI 内容须先经过草稿审核。确认后自动建立卡片自身的独立复习计划；已有计划不重复创建，暂停计划需在复习中心明确恢复。</p></div><span className="badge">私人学习资料</span></div>
+    <form className="card-new-deck" onSubmit={e=>{e.preventDefault();void mutate(async()=>{await api('/learning/decks','POST',{name:newDeck});if(active())setNewDeck('')},'卡片集已创建。')}}><label>新卡片集名称<input value={newDeck} onChange={e=>setNewDeck(e.target.value)} maxLength={100} placeholder="例如：高等数学" required/></label><button className="secondary" disabled={busy||!newDeck.trim()}>创建卡片集</button></form>
+    <NoteError error={decks.error}/>{decks.isPending?<p role="status">正在读取卡片集…</p>:decks.data?.items.length?<div className="card-decks">{decks.data.items.map(deck=><DeckRow key={deck.id+':'+deck.revision} deck={deck} busy={busy} onPatch={patch=>void mutate(()=>api('/learning/decks/'+deck.id,'PATCH',{revision:deck.revision,...patch}),'卡片集已更新。')}/>)}</div>:<p className="empty">还没有卡片集，请先创建一个。</p>}
+    {(decks.data?.total||0)>50?<div className="card-pagination"><span>共 {decks.data!.total} 个卡片集</span><div><button type="button" className="text-button" disabled={!deckOffset} onClick={()=>setDeckOffset(value=>Math.max(0,value-50))}>上一页卡片集</button><button type="button" className="text-button" disabled={deckOffset+50>=decks.data!.total} onClick={()=>setDeckOffset(value=>value+50)}>下一页卡片集</button></div></div>:null}
+  </section>
+  <section className="panel" aria-label="卡片列表"><div className="panel-heading"><h3>学习卡片</h3><div className="card-actions"><button type="button" className="secondary" onClick={()=>{setEditor(null);setShowGeneration(value=>!value)}}>{showGeneration?'收起 AI 草稿':'AI 生成草稿'}</button><button type="button" className="primary" disabled={!decks.data?.items.some(deck=>deck.status==='active')} onClick={()=>{setShowGeneration(false);setEditor('new');setReading('')}}>手工新建卡片</button></div></div>
+    <div className="card-filters"><label>筛选卡片集<select aria-label="筛选卡片集" value={deckFilter} onChange={e=>filters(()=>setDeckFilter(e.target.value))}><option value="">全部卡片集</option>{decks.data?.items.map(deck=><option key={deck.id} value={deck.id}>{deck.name}{deck.status==='archived'?'（已归档）':''}</option>)}</select></label><label>筛选状态<select aria-label="筛选状态" value={status} onChange={e=>filters(()=>setStatus(e.target.value))}><option value="">全部状态</option>{Object.entries(statusNames).map(([value,name])=><option key={value} value={value}>{name}</option>)}</select></label><label>筛选类型<select aria-label="筛选类型" value={kind} onChange={e=>filters(()=>setKind(e.target.value))}><option value="">全部类型</option>{Object.entries(kindNames).map(([value,name])=><option key={value} value={value}>{name}</option>)}</select></label><button type="button" className="text-button" onClick={()=>{setSelected([]);setReading('');setError(null);void cards.refetch()}}>刷新卡片</button></div>
+    <NoteError error={error||cards.error}/>{error instanceof ApiError&&error.status===409?<div className="card-generation-warning" role="alert">版本冲突，整批未写入。请刷新卡片并重新选择审核；当前编辑内容未被覆盖。<button type="button" className="text-button" onClick={()=>{setSelected([]);setError(null);refresh()}}>刷新冲突卡片</button></div>:null}{notice?<p className="muted" role="status">{notice}</p>:null}
+    <div className="card-batch"><label className="card-check"><input type="checkbox" aria-label="选择本页全部卡片" checked={allPageSelected(selected,currentPage)} disabled={busy||!cards.data?.items.length} onChange={e=>setSelected(e.target.checked?cards.data!.items:[])}/>本页全选</label><span>已选 {selected.length} 张（最多 50）</span><button type="button" className="secondary" disabled={busy||!selected.length} onClick={()=>review('confirm')}>明确确认所选</button><button type="button" className="text-button" disabled={busy||!selected.length} onClick={()=>review('archive')}>归档所选</button></div>
+    {cards.isPending?<p role="status">正在读取卡片…</p>:cards.data?.items.length?<ul className="learning-card-list">{cards.data.items.map(card=><li key={card.id}><label className="card-row-check"><input type="checkbox" aria-label={'选择卡片 '+card.front.slice(0,30)} checked={selected.some(item=>item.id===card.id)} disabled={busy||selected.length>=50&&!selected.some(item=>item.id===card.id)} onChange={e=>setSelected(old=>e.target.checked?[...old,card]:old.filter(item=>item.id!==card.id))}/></label><button type="button" className="card-row-open" onClick={()=>setReading(current=>current===card.id?'':card.id)}><span><span className="badge">{kindNames[card.kind]}</span> <span className={'badge '+card.status}>{statusNames[card.status]}</span>{card.generation_id?<span className="badge">AI 草稿来源</span>:null}</span><strong>{card.front}</strong><small>{decks.data?.items.find(deck=>deck.id===card.deck_id)?.name||'卡片集'} · 版本 {card.revision}{card.source&&!card.source_valid?' · 来源需要核对':''}</small></button><button type="button" className="text-button" onClick={()=>{setShowGeneration(false);setEditor(card);setReading('')}}>编辑卡片</button></li>)}</ul>:<p className="empty">没有符合条件的卡片。创建卡片或调整筛选。</p>}
+    <div className="card-pagination"><span>共 {cards.data?.total||0} 张 · 第 {Math.floor(offset/pageSize)+1} 页</span><div><button type="button" className="secondary" disabled={offset===0||cards.isFetching} onClick={()=>page(Math.max(0,offset-pageSize))}>上一页卡片</button><button type="button" className="secondary" disabled={offset+pageSize>=(cards.data?.total||0)||cards.isFetching} onClick={()=>page(offset+pageSize)}>下一页卡片</button></div></div>
+  </section>
+  {reading?<CardReader key={reading} owner={owner} sessionId={sessionId} id={reading} onOpenNote={onOpenNote} onClose={()=>setReading('')}/>:null}
+  {editor?<CardEditor key={editor==='new'?'new':editor.id+':'+editor.revision} owner={owner} sessionId={sessionId} card={editor==='new'?undefined:editor} decks={decks.data?.items||[]} onOpenNote={onOpenNote} onClose={()=>setEditor(null)} onSaved={saved=>{setSelected(old=>old.map(item=>item.id===saved.id?saved:item));setEditor(null);setNotice('卡片已保存。');refresh()}}/>:null}
+  {showGeneration?<CardGenerations owner={owner} sessionId={sessionId} decks={decks.data?.items||[]} onDrafts={refresh} onOpenCard={setReading}/>:null}
+  </div>
+}
+function DeckRow({deck,busy,onPatch}:{deck:Deck;busy:boolean;onPatch:(patch:{name?:string;status?:Deck['status']})=>void}){
+  const [name,setName]=useState(deck.name)
+  return <form className="card-deck-row" onSubmit={e=>{e.preventDefault();onPatch({name})}}><label><span className="sr-only">重命名 {deck.name}</span><input aria-label={'重命名 '+deck.name} value={name} maxLength={100} onChange={e=>setName(e.target.value)} required/></label><span className="badge">{deck.status==='active'?'使用中':'已归档'}</span><button className="text-button" disabled={busy||name===deck.name||!name.trim()}>保存名称</button><button type="button" className="text-button" disabled={busy} onClick={()=>onPatch({status:deck.status==='active'?'archived':'active'})}>{deck.status==='active'?'归档卡片集':'恢复卡片集'}</button><small className="muted">归档保留全部卡片与历史</small></form>
+}
+function CardReader({owner,sessionId,id,onOpenNote,onClose}:{owner:string;sessionId:string;id:string;onOpenNote:(id:string)=>void;onClose:()=>void}){
+  const card=useQuery({queryKey:['card',owner,sessionId,id],queryFn:()=>api<Card>('/learning/cards/'+id),retry:false}),[read,setRead]=useState<SourceRead|null>(null)
+  const host=useRef<HTMLElement>(null)
+  useLearningActivity('card_practice',card.data?.status==='confirmed'&&!card.isError?{card_id:id}:null)
+  useEffect(()=>{host.current?.focus({preventScroll:true});host.current?.scrollIntoView({block:'start'})},[])
+  const onRead=useCallback((value:SourceRead|null)=>setRead(value),[])
+  return <section ref={host} tabIndex={-1} className="panel" aria-label="阅读卡片"><div className="panel-heading"><h3>阅读卡片</h3><button type="button" className="text-button" onClick={onClose}>关闭阅读</button></div><NoteError error={card.error}/>{card.isPending?<p role="status">正在读取卡片…</p>:card.data?<><CardPreview kind={card.data.kind} front={card.data.front} back={card.data.back} masks={card.data.payload?.masks} visual={read?sourceVisual(read):null}/><CardSource owner={owner} sessionId={sessionId} card={card.data} onRead={onRead} onOpenNote={onOpenNote}/></>:null}</section>
+}

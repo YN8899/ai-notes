@@ -20,6 +20,11 @@ from app.modules.ai.router import router as ai_router
 from app.modules.ai.chat_router import router as chat_router
 from app.modules.ai.saved_router import router as saved_router
 from app.modules.exports.router import router as exports_router
+from app.modules.search.router import router as ocr_router
+from app.modules.search.keyword_router import router as keyword_router
+from app.modules.search.semantic_router import router as semantic_router
+from app.modules.learning.card_router import router as cards_router
+from app.modules.learning.review_router import router as reviews_router
 
 log = logging.getLogger("notes.api")
 app = FastAPI(title="AI Notes M0", version="0.1.0")
@@ -94,6 +99,7 @@ errors = {status: {"model": ErrorOut} for status in (400, 401, 403, 404, 409, 42
 # Python 3.12/3.13 use different default HTTPStatus phrases for 422.
 errors[422]["description"] = "Unprocessable Content"
 app.include_router(auth_router, prefix="/api/v1", responses=errors)
+app.include_router(reviews_router, prefix="/api/v1", responses=errors)
 app.include_router(jobs_router, prefix="/api/v1", responses=errors)
 app.include_router(files_router, prefix="/api/v1", responses=errors)
 app.include_router(pdf_router, prefix="/api/v1", responses={**errors, 503: {"model": ErrorOut}})
@@ -104,3 +110,14 @@ app.include_router(saved_router, prefix="/api/v1", responses=errors)
 app.include_router(exports_router, prefix="/api/v1", responses={
     **errors, 413: {"model": ErrorOut, "description": "Content Too Large"}, 503: {"model": ErrorOut},
 })
+app.include_router(ocr_router, prefix="/api/v1", responses={**errors, 503: {"model": ErrorOut}})
+app.include_router(keyword_router, prefix="/api/v1", responses=errors)
+app.include_router(semantic_router, prefix="/api/v1", responses={**errors, 413: {"model": ErrorOut}, 503: {"model": ErrorOut}})
+app.include_router(cards_router, prefix="/api/v1", responses={**errors, 503: {"model": ErrorOut}})
+
+from app.modules.learning.quiz_router import router as quizzes_router
+app.include_router(quizzes_router, prefix="/api/v1", responses={**errors, 503: {"model": ErrorOut}})
+from app.modules.learning.reminder_router import router as reminders_router
+app.include_router(reminders_router, prefix="/api/v1", responses=errors)
+from app.modules.learning.stats_router import router as stats_router
+app.include_router(stats_router, prefix="/api/v1", responses=errors)

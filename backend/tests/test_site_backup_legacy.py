@@ -28,7 +28,11 @@ ROOT = Path(__file__).resolve().parents[2]
 BACKEND = ROOT / "backend"
 LEGACY = "c2e41a9f3b67"
 NORMALIZED = {"sessions", "file_tickets", "password_resets", "ai_credentials", "jobs"}
-NEW_TABLES = {"pdf_imports", "ai_conversations", "ai_runs", "ai_steps", "ai_saved_notes"}
+NEW_TABLES = {"pdf_imports", "ai_conversations", "ai_runs", "ai_steps", "ai_saved_notes", "ocr_documents",
+              "semantic_indexes", "semantic_chunks", "semantic_queries", "semantic_calls",
+              "learning_decks", "learning_cards", "card_generations", "learning_quizzes", "review_items", "review_plans", "review_logs",
+              "quiz_questions", "quiz_attempts", "quiz_answers", "quiz_operations", "quiz_answer_reviews", "quiz_generations", "quiz_gradings",
+              "user_learning_settings", "daily_review_digests", "learning_events"}
 OWNED = re.compile(r"notes_restore_site_legacy_(?:source|target)_[0-9a-f]{24}")
 NOW = datetime(2026, 10, 25, 12, 0, tzinfo=timezone.utc)
 
@@ -377,18 +381,65 @@ def test_legacy_local_roundtrip_preserves_all_old_tables_and_migrates_only_resto
         else:
             assert entry["key"] in legacy_source.ids.optional and not entry["mandatory"]
     columns = {name: list(rows[0]) for name, rows in legacy_source.original_rows.items()}
-    # Use the actual four repository migrations, keeping the old row projection.
-    for revision in ("d89f74a2136c", "16bd16083e39", "63b9d8343e02", "2ef16e7ca892"):
+    # Use the actual repository migrations, keeping the old row projection.
+    for revision in ("d89f74a2136c", "16bd16083e39", "63b9d8343e02", "2ef16e7ca892", "7c0a9d2e4f61", "b81d4f0a6c32",
+                     "c4d72e9a1f03", "d58a3b7c901e", "e62a9c4f710b", "f73b5d8a201c", "84c6e9b302df"):
         _alembic(target, "upgrade", revision)
         assert _revision(target) == revision
     assert "No new upgrade operations detected" in _alembic(target, "check")
-    assert _rows(target, columns) == {**restored, "alembic_version": [{"version_num": "2ef16e7ca892"}]}
+    assert _rows(target, columns) == {**restored, "alembic_version": [{"version_num": "84c6e9b302df"}]}
     current = _rows(target)
     assert set(current) - set(restored) == NEW_TABLES
     assert all(not current[name] for name in NEW_TABLES)
     assert all(row["pdf_page_number"] is None for row in current["note_pages"])
     assert _stored_objects(target) == legacy_source.contents
     _assert_source_unchanged(legacy_source)
+
+
+def test_c39_27_table_profile_restores_and_migrates_only_isolated_copy(
+    legacy_tools, legacy_databases, tmp_path,
+):
+    source = _seed(legacy_databases("source", old=True))
+    _alembic(source, "upgrade", "2ef16e7ca892")
+    before = _rows(source)
+    path = tmp_path / "c39-27-table-bundle"
+    # The default OCR head cannot accidentally admit an old 27-table source.
+    with pytest.raises(legacy_tools.tool.SiteBackupError) as error:
+        _backup(legacy_tools, source, tmp_path / "wrong-head", schema_revision=None)
+    assert error.value.code == "backup_schema_invalid"
+    _backup(legacy_tools, source, path, schema_revision="2ef16e7ca892")
+    manifest = legacy_tools.tool.verify_site_backup(path)
+    assert manifest["schema_revision"] == "2ef16e7ca892" and len(manifest["tables"]) == 27
+    target = legacy_databases()
+    result = _restore(legacy_tools, path, target)
+    assert result["original_fingerprints_verified"] is True
+    assert _revision(target) == "2ef16e7ca892" and len(_rows(target)) == 27
+    assert _stored_objects(target) == source.contents
+    _alembic(target, "upgrade", "head")
+    assert _revision(target) == "84c6e9b302df" and len(_rows(target)) == 49
+    assert _rows(target)["ocr_documents"] == []
+    assert _rows(source) == before
+
+
+@pytest.mark.parametrize("revision,damage", [
+    ("2ef16e7ca892", "column"), ("2ef16e7ca892", "foreign_key"),
+    ("7c0a9d2e4f61", "column"), ("7c0a9d2e4f61", "check"),
+])
+def test_exact_modern_profile_rejects_structure_drift_despite_correct_stamp(
+    legacy_tools, legacy_databases, tmp_path, revision, damage,
+):
+    source = legacy_databases("source", old=True)
+    _alembic(source, "upgrade", revision)
+    with source.engine.begin() as connection:
+        if damage == "column":
+            connection.execute(text("ALTER TABLE ai_runs ALTER COLUMN prompt TYPE varchar(1000)"))
+        elif damage == "foreign_key":
+            connection.execute(text("ALTER TABLE ai_runs DROP CONSTRAINT fk_ai_run_conversation_owner"))
+        else:
+            connection.execute(text("ALTER TABLE ocr_documents DROP CONSTRAINT ocr_reviewed_text"))
+    with pytest.raises(legacy_tools.tool.SiteBackupError) as error:
+        _backup(legacy_tools, source, tmp_path / "drift", schema_revision=revision)
+    assert error.value.code == "backup_schema_invalid"
 
 
 class _OSSBody:

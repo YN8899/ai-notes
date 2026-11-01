@@ -20,6 +20,29 @@ from site_backup_support import SiteBackupError
 
 
 class ProfileTests(unittest.TestCase):
+    def test_quiz_and_reminder_profiles_preserve_predecessors_and_frozen_guards(self):
+        previous = profiles.frozen_catalog(profiles.REVIEW_REVISION)["catalog"]
+        for revision, tables, columns, migrations in ((profiles.QUIZ_REVISION,46,428,13),
+                                                       (profiles.REMINDER_REVISION,48,445,14),
+                                                       (profiles.EVENT_REVISION,49,456,15)):
+            with self.subTest(revision=revision):
+                document = profiles.frozen_catalog(revision)
+                self.assertEqual(len(document['catalog']), tables)
+                self.assertEqual(sum(len(t['columns']) for t in document['catalog'].values()), columns)
+                self.assertEqual(len(document['migration_sources_sha256_lf']), migrations)
+                self.assertEqual(previous, {k:v for k,v in document['catalog'].items() if k in previous})
+                for filename, expected in document['migration_sources_sha256_lf'].items():
+                    raw = (ROOT/'backend/alembic/versions'/filename).read_bytes().replace(b'\r\n', b'\n')
+                    self.assertEqual(hashlib.sha256(raw).hexdigest(), expected)
+                guards = json.loads((ROOT/'ops/site-backup-profiles'/f'{revision}-guards.json').read_text(encoding='utf-8'))
+                self.assertEqual({t['name'] for t in guards['triggers']},
+                                 {'review_logs_immutable','quiz_answer_reviews_immutable'})
+                with patch.object(profiles, 'capture_learning_guards', return_value=deepcopy(guards)) as capture:
+                    profiles.validate_learning_guards(object(), revision)
+                    capture.return_value['triggers'][0]['enabled'] = 'D'
+                    self.assert_invalid(profiles.validate_learning_guards, object(), revision)
+                previous = document['catalog']
+
     def assert_invalid(self, function, *arguments):
         with self.assertRaises(SiteBackupError) as caught:
             function(*arguments)
@@ -39,9 +62,90 @@ class ProfileTests(unittest.TestCase):
         for filename, expected in document["migration_sources_sha256_lf"].items():
             source = (ROOT / "backend" / "alembic" / "versions" / filename).read_bytes()
             self.assertEqual(hashlib.sha256(source.replace(b"\r\n", b"\n")).hexdigest(), expected)
+
+    def test_pre_ocr_and_ocr_catalogs_are_independent_exact_migration_evidence(self):
+        for revision, table_count, column_count in ((profiles.PRE_OCR_REVISION, 27, 211),
+                                                   (profiles.OCR_REVISION, 28, 227)):
+            with self.subTest(revision=revision):
+                document = profiles.frozen_catalog(revision)
+                self.assertEqual(len(document["catalog"]), table_count)
+                self.assertEqual(sum(len(table["columns"]) for table in document["catalog"].values()), column_count)
+                self.assertEqual("ocr_documents" in document["catalog"], revision == profiles.OCR_REVISION)
+                for filename, expected in document["migration_sources_sha256_lf"].items():
+                    source = (ROOT / "backend/alembic/versions" / filename).read_bytes().replace(b"\r\n", b"\n")
+                    self.assertEqual(hashlib.sha256(source).hexdigest(), expected)
+        old, new = (profiles.frozen_catalog(revision)["catalog"] for revision in
+                    (profiles.PRE_OCR_REVISION, profiles.OCR_REVISION))
+        self.assertEqual(old, {name: table for name, table in new.items() if name != "ocr_documents"})
+
+    def test_frozen_heads_reject_wrong_table_set_and_structural_drift(self):
+        for revision in (profiles.PRE_OCR_REVISION, profiles.OCR_REVISION, profiles.SEMANTIC_REVISION):
+            document = profiles.frozen_catalog(revision)
+            inspector = SimpleNamespace(get_table_names=lambda **kwargs: document["tables"])
+            with patch.object(profiles, "inspect", return_value=inspector), \
+                    patch.object(profiles, "capture_catalog", return_value=deepcopy(document["catalog"])) as capture:
+                profiles.validate_frozen_schema(object(), revision)
+                capture.return_value["ai_runs"]["foreign_keys"][0]["referred_columns"] = ["id"]
+                self.assert_invalid(profiles.validate_frozen_schema, object(), revision)
+                capture.return_value = document["catalog"]
+                inspector.get_table_names = lambda **kwargs: document["tables"] + ["unknown_table"]
+                self.assert_invalid(profiles.validate_frozen_schema, object(), revision)
         # Mutating a returned document cannot replace the next expected catalog.
         document["catalog"]["files"]["columns"].clear()
         self.assertTrue(profiles.legacy_catalog()["catalog"]["files"]["columns"])
+
+    def test_semantic_profile_adds_only_four_derived_tables_and_pins_migrations(self):
+        document = profiles.frozen_catalog(profiles.SEMANTIC_REVISION)
+        old = profiles.frozen_catalog(profiles.OCR_REVISION)["catalog"]
+        self.assertEqual(len(document["catalog"]), 32)
+        self.assertEqual(sum(len(t["columns"]) for t in document["catalog"].values()), 272)
+        self.assertEqual(set(document["catalog"]) - set(old),
+                         {"semantic_indexes", "semantic_chunks", "semantic_queries", "semantic_calls"})
+        self.assertEqual(old, {key: value for key, value in document["catalog"].items() if key in old})
+        for filename, expected in document["migration_sources_sha256_lf"].items():
+            raw = (ROOT / "backend/alembic/versions" / filename).read_bytes().replace(b"\r\n", b"\n")
+            self.assertEqual(hashlib.sha256(raw).hexdigest(), expected)
+        vectors = [c for c in document["catalog"]["semantic_chunks"]["columns"] if c["name"] == "embedding"]
+        self.assertEqual(vectors[0]["type"], "vector")
+
+    def test_vector_member_inventory_rejects_unrelated_extension_member(self):
+        expected = json.loads((ROOT / "ops/site-backup-profiles/vector-0.8.7.json").read_text(encoding="utf-8"))
+        self.assertEqual(len(expected), 234)
+        with patch.object(profiles, "capture_vector_catalog", return_value=deepcopy(expected)) as capture:
+            profiles.validate_vector_catalog(object())
+            capture.return_value.append({"identity": "function unrelated()", "definition": "private sentinel"})
+            self.assert_invalid(profiles.validate_vector_catalog, object())
+
+    def test_card_profile_preserves_semantic_schema_and_pins_all_eleven_migrations(self):
+        document = profiles.frozen_catalog(profiles.CARD_REVISION)
+        old = profiles.frozen_catalog(profiles.SEMANTIC_REVISION)["catalog"]
+        self.assertEqual(len(document["catalog"]), 35)
+        self.assertEqual(sum(len(t["columns"]) for t in document["catalog"].values()), 306)
+        self.assertEqual(set(document["catalog"]) - set(old), {"learning_cards", "learning_decks", "card_generations"})
+        self.assertEqual(old, {key:value for key,value in document["catalog"].items() if key in old})
+        self.assertEqual(len(document["migration_sources_sha256_lf"]), 11)
+        for filename, expected in document["migration_sources_sha256_lf"].items():
+            raw = (ROOT/"backend/alembic/versions"/filename).read_bytes().replace(b"\r\n",b"\n")
+            self.assertEqual(hashlib.sha256(raw).hexdigest(), expected)
+
+    def test_review_profile_keeps_card_schema_and_checks_guard_definitions(self):
+        document = profiles.frozen_catalog(profiles.REVIEW_REVISION)
+        old = profiles.frozen_catalog(profiles.CARD_REVISION)["catalog"]
+        self.assertEqual(len(document["catalog"]), 39)
+        self.assertEqual(sum(len(t["columns"]) for t in document["catalog"].values()), 348)
+        self.assertEqual(old, {key:value for key,value in document["catalog"].items() if key in old})
+        self.assertEqual(len(document["migration_sources_sha256_lf"]), 12)
+        for filename, expected_hash in document["migration_sources_sha256_lf"].items():
+            raw = (ROOT/"backend/alembic/versions"/filename).read_bytes().replace(b"\r\n",b"\n")
+            self.assertEqual(hashlib.sha256(raw).hexdigest(), expected_hash)
+        path = ROOT/"ops/site-backup-profiles"/(profiles.REVIEW_REVISION+"-guards.json")
+        expected = json.loads(path.read_text(encoding="utf-8"))
+        self.assertEqual(len(expected["routines"]), 1)
+        self.assertEqual(len(expected["triggers"]), 1)
+        with patch.object(profiles, "capture_learning_guards", return_value=deepcopy(expected)) as capture:
+            profiles.validate_learning_guards(object(), profiles.REVIEW_REVISION)
+            capture.return_value["triggers"][0]["enabled"] = "D"
+            self.assert_invalid(profiles.validate_learning_guards, object(), profiles.REVIEW_REVISION)
 
     def test_bad_catalog_is_rejected_without_exposing_paths_or_source_text(self):
         document = profiles.legacy_catalog()

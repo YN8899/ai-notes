@@ -32,6 +32,8 @@ crcmod-plus==2.3.6
     # via alibabacloud-oss-v2
 fastapi==0.143.0
     # via ai-notes-backend
+fsrs==6.3.2
+    # via ai-notes-backend
 h11==0.16.0
     # via
     #   httpcore
@@ -100,6 +102,7 @@ typing-extensions==4.16.0
     #   alembic
     #   anyio
     #   fastapi
+    #   fsrs
     #   opentelemetry-api
     #   psycopg
     #   pydantic
@@ -112,8 +115,10 @@ typing-inspection==0.4.4
     #   fastapi
     #   pydantic
     #   pydantic-settings
-tzdata==2026.5 ; sys_platform == 'win32'
-    # via psycopg
+tzdata==2026.5
+    # via
+    #   ai-notes-backend
+    #   psycopg
 urllib3==2.8.0
     # via requests
 uvicorn==0.54.0

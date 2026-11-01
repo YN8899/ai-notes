@@ -325,7 +325,11 @@ class WheelhouseTests(unittest.TestCase):
 
     def test_linux_profile_preserves_pins_and_excludes_only_false_conditions(self):
         full = wh.profile_pins(BACKEND, "backup")
-        self.assertNotIn("tzdata", full)
+        # M2 reminder timezones are a direct cross-platform dependency now.
+        self.assertEqual(full["tzdata"], "2026.5")
+        self.assertEqual(full["fsrs"], "6.3.2")
+        # Still prove that an actually false marker is excluded on Linux.
+        self.assertEqual(wh.parse_lock("always-fixture==1\nwindows-only-fixture==1 ; sys_platform == 'win32'"), {"always-fixture": "1"})
         self.assertIn("uvloop", full)
         self.assertIn("pycparser", full)
         self.assertIn("psycopg-binary", full)

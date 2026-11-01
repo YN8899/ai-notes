@@ -1,7 +1,8 @@
 name: ai-notes-test
 services:
   db:
-    image: postgres:16.8-alpine
+    image: ai-notes-postgres:local
+    build: ./ops/postgres
     environment:
       POSTGRES_USER: notes
       POSTGRES_PASSWORD: notes
