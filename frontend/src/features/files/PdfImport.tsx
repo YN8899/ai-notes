@@ -45,15 +45,18 @@ async function transfer(item: PdfImportOut, file: File, progress: (percent: numb
   return api<PdfImportOut>('/pdf-imports/' + item.id + '/start', 'POST', {})
 }
 
-export function PdfImportForm({ notebookId, tagIds, onOpen }: { notebookId: string; tagIds: string[]; onOpen: (id: string) => void }) {
+export function PdfImportForm({ notebookId, tagIds, onOpen, onBusyChange }: {
+  notebookId: string; tagIds: string[]; onOpen: (id: string) => void; onBusyChange?: (busy: boolean) => void
+}) {
   const [file, setFile] = useState<File | null>(null), [item, setItem] = useState<PdfImportOut | null>(null)
   const [busy, setBusy] = useState(false), [progress, setProgress] = useState(0), [error, setError] = useState<unknown>(null)
   const requestKey = useRef(createUuid()), controller = useRef<AbortController | null>(null), alive = useRef(true)
-  useEffect(() => { alive.current = true; return () => { alive.current = false; controller.current?.abort() } }, [])
+  const busyCallback = useRef(onBusyChange); busyCallback.current = onBusyChange
+  useEffect(() => { alive.current = true; return () => { alive.current = false; controller.current?.abort(); busyCallback.current?.(false) } }, [])
   async function submit(event: FormEvent) {
     event.preventDefault()
     if (!file || busy) return
-    setBusy(true); setError(null); setProgress(0)
+    setBusy(true); busyCallback.current?.(true); setError(null); setProgress(0)
     controller.current = new AbortController()
     try {
       validPdf(file)
@@ -66,7 +69,7 @@ export function PdfImportForm({ notebookId, tagIds, onOpen }: { notebookId: stri
       await transfer(created, file, percent => { if (alive.current) setProgress(percent) }, controller.current.signal)
       if (alive.current) onOpen(created.note_id)
     } catch (failure) { if (alive.current) setError(failure) }
-    finally { if (alive.current) setBusy(false) }
+    finally { if (alive.current) { setBusy(false); busyCallback.current?.(false) } }
   }
   return <section className="panel pdf-import-panel">
     <h3>导入 PDF 笔记</h3>
