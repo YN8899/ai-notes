@@ -1,12 +1,19 @@
-import { lazy, Suspense, useEffect, useState, useSyncExternalStore, type FormEvent, type ReactNode } from 'react'
+import {useNotificationFeed} from './features/notifications/useNotificationFeed'
+import {NotificationHistory} from './features/notifications/NotificationHistory'
+import {useChatRealtime} from './features/social/useChatRealtime'
+import {cancelPushForLogout} from './features/pwa/push'
+import { lazy, Suspense, useEffect, useState, useSyncExternalStore, useCallback, useRef, type FormEvent, type ReactNode } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { BookOpen, ArrowUpRight, LayoutDashboard, Ticket, Users, ShieldCheck, Activity, LogOut, Bell, RefreshCw, Check, ChevronRight, KeyRound, Copy, MessageSquare } from 'lucide-react'
-import { api, authenticate, logoutTab, date, ApiError, type User, type Invite, type CreatedInvite, type Job, type Notice, type Audit, type LoginInput, type RegisterInput, type ResetInput } from './api'
+import { api, authenticate, logoutTab, date, ApiError, type User, type Invite, type CreatedInvite, type Job, type Audit, type LoginInput, type RegisterInput, type ResetInput } from './api'
 
 import { clearTabNavigation,rememberSection,rememberNote,wasNotesOpen,wasChatOpen } from './features/notes/drafts'
-import { authSession,clearSession,startSessionSync } from './session.ts'
+import { authSession,clearSession,readSession,startSessionSync } from './session.ts'
 import { createUuid } from './uuid'
 import {LearningActivityProvider} from './features/learning/ActivityTracker'
+import {usePersonalization} from './features/personalization/usePersonalization'
+import {homeSection,shouldApplyHomeDefault} from './features/personalization/personalization'
+import {createStartupDefaults} from './features/personalization/startup-default'
 import type { AskTextSelection } from './features/notes/text-selection'
 const NotesWorkspace=lazy(()=>import('./features/notes/NotesWorkspace'))
 const AiChat=lazy(()=>import('./features/ai/AiChat'))
@@ -16,8 +23,18 @@ const QuizWorkspace=lazy(()=>import('./features/learning/QuizWorkspace'))
 const ReviewCenter=lazy(()=>import('./features/learning/ReviewCenter'))
 const LearningOverview=lazy(()=>import('./features/learning/LearningOverview'))
 const LearningPreferences=lazy(()=>import('./features/learning/LearningPreferences'))
-type Section='home'|'notes'|'cards'|'quizzes'|'reviews'|'learning'|'preferences'|'chat'|'ai'|'invites'|'users'|'jobs'|'audit'
+const SocialWorkspace=lazy(()=>import('./features/social/SocialWorkspace'))
+const ChatWorkspace=lazy(()=>import('./features/social/ChatWorkspace'))
+const PwaSettings=lazy(()=>import('./features/pwa/PwaSettings'))
+const OfflineEntry=lazy(()=>import('./features/offline/OfflineEntry'))
+const OfflineSettings=lazy(()=>import('./features/offline/OfflineSettings'))
+const ProfileSettings=lazy(()=>import('./features/social/ProfileSettings'))
+const Workbench=lazy(()=>import('./features/social/Workbench'))
+const CommunityWorkspace=lazy(()=>import('./features/community/CommunityWorkspace'))
+const ArchiveHistory=lazy(()=>import('./features/social/ArchiveHistory'))
+type Section='home'|'notes'|'cards'|'quizzes'|'reviews'|'learning'|'preferences'|'social'|'messages'|'community'|'profile'|'chat'|'ai'|'invites'|'users'|'jobs'|'audit'
 const statuses:Record<string,string>={queued:'等待执行',running:'正在执行',succeeded:'已完成',failed:'失败',active:'正常',disabled:'已停用'}
+const startupDefaults=createStartupDefaults(()=>window.sessionStorage,()=>readSession()?.scope||'')
 function ErrorMessage({error}:{error:unknown}) {
   if (!error) return null
   return <div className="error" role="alert">{error instanceof Error ? error.message : '操作失败，请重试'}{error instanceof ApiError ? <small>请求标识：{error.requestId}</small> : null}</div>
@@ -25,7 +42,7 @@ function ErrorMessage({error}:{error:unknown}) {
 function Empty({children}:{children:ReactNode}) {return <div className="empty">{children}</div>}
 function Status({value}:{value:string}) {return <span className={'badge '+value}>{statuses[value]||value}</span>}
 
-function AuthScreen({notice,error}:{notice?:string;error?:unknown}) {
+function AuthScreen({notice,error,onOffline}:{notice?:string;error?:unknown;onOffline:()=>void}) {
   const client=useQueryClient()
   const [mode,setMode]=useState<'login'|'register'|'reset'>('login')
   const mutation=useMutation({mutationFn:async(form:HTMLFormElement)=>{
@@ -49,7 +66,7 @@ function AuthScreen({notice,error}:{notice?:string;error?:unknown}) {
         <ErrorMessage error={mutation.error}/><button className="primary full" disabled={mutation.isPending}>{mutation.isPending?'正在处理…':mode==='login'?'登录学习空间':mode==='register'?'创建账户':'重置密码'}<ArrowUpRight size={18}/></button>
       </form>
       <div className="auth-links">{(['login','register','reset'] as const).filter(x=>x!==mode).map(x=><button className="text-button" key={x} onClick={()=>{setMode(x);mutation.reset()}}>{x==='login'?'返回登录':x==='register'?'使用邀请码注册':'忘记密码'}</button>)}</div>
-      <p className="auth-note">登录仅对当前标签页生效，刷新保留登录。新开标签页可登录其他账号。</p>
+      <button type="button" className="secondary" onClick={onOffline}>解锁本机离线资料</button><p className="auth-note">登录仅对当前标签页生效，刷新保留登录。新开标签页可登录其他账号。</p>
     </section>
   </main>
 }
@@ -81,7 +98,7 @@ function JobsPanel({admin}:{admin:boolean}) {
   const query=useQuery({queryKey:['jobs',admin],queryFn:()=>api<Job[]>(admin?'/admin/jobs':'/jobs'),refetchInterval:3000})
   const create=useMutation({mutationFn:()=>api<Job>('/jobs/diagnostic','POST',{request_key:createUuid(),duration_seconds:3}),onSuccess:()=>client.invalidateQueries({queryKey:['jobs']})})
   const retry=useMutation({mutationFn:(id:string)=>api('/admin/jobs/'+id+'/retry','POST',{}),onSuccess:()=>client.invalidateQueries({queryKey:['jobs']})})
-  return <div className="panel"><div className="panel-heading"><div><h3>后台任务</h3><p className="muted">自检任务用于验证后台处理。页面会自动更新任务状态。</p></div><button className="primary" disabled={create.isPending} onClick={()=>create.mutate()}>运行自检 <Activity size={16}/></button></div><ErrorMessage error={query.error||create.error||retry.error}/>{query.data?.length?<div className="table-wrap"><table><thead><tr><th>任务</th><th>状态</th><th>尝试次数</th><th>创建时间</th><th>结果</th></tr></thead><tbody>{query.data.map(j=><tr key={j.id}><td>{j.kind==='pdf.import'?'PDF 导入':j.kind==='image.process'?'图片处理':'后台自检'}<small>{j.id.slice(0,8)}</small></td><td><Status value={j.status}/></td><td>{j.attempts} / {j.max_attempts}</td><td>{date(j.created_at)}</td><td>{j.status==='failed'&&admin?<button className="text-button" disabled={retry.isPending} onClick={()=>retry.mutate(j.id)}>重新执行</button>:j.status==='succeeded'?(j.kind==='pdf.import'?(j.result?.accepted?'已转换 '+j.result.pages+' 页':'未完整转换，请在笔记中查看原因'):'正常'):j.error_code||'—'}</td></tr>)}</tbody></table></div>:<Empty>暂无任务。运行一次自检，检查后台是否正常工作。</Empty>}</div>
+  return <div className="panel"><div className="panel-heading"><div><h3>后台任务</h3><p className="muted">自检任务用于验证后台处理。页面会自动更新任务状态。</p></div><button className="primary" disabled={create.isPending} onClick={()=>create.mutate()}>运行自检 <Activity size={16}/></button></div><ErrorMessage error={query.error||create.error||retry.error}/>{query.data?.length?<div className="table-wrap"><table><thead><tr><th>任务</th><th>状态</th><th>尝试次数</th><th>创建时间</th><th>结果</th></tr></thead><tbody>{query.data.map(j=><tr key={j.id}><td>{j.kind==='pdf.import'?'PDF 导入':j.kind==='image.process'?'图片处理':j.kind==='notification.test'?'浏览器提醒测试':j.kind==='notification.push'?'浏览器推送':'后台自检'}<small>{j.id.slice(0,8)}</small></td><td><Status value={j.status}/></td><td>{j.attempts} / {j.max_attempts}</td><td>{date(j.created_at)}</td><td>{j.status==='failed'&&admin?<button className="text-button" disabled={retry.isPending} onClick={()=>retry.mutate(j.id)}>重新执行</button>:j.status==='succeeded'?(j.kind==='notification.push'?(j.result?.outcome==='accepted'?'推送服务已接受，设备送达未确认':j.result?.outcome==='skipped'?'已跳过':'推送处理已结束'):j.kind==='notification.test'?(j.result?.outcome==='queued'?'站内测试已生成，等待推送':'已跳过'):j.kind==='pdf.import'?(j.result?.accepted?'已转换 '+j.result.pages+' 页':'未完整转换，请在笔记中查看原因'):'正常'):j.error_code||'—'}</td></tr>)}</tbody></table></div>:<Empty>暂无任务。运行一次自检，检查后台是否正常工作。</Empty>}</div>
 }
 
 function AuditPanel() {
@@ -91,20 +108,28 @@ function AuditPanel() {
 
 function Home({user,onGo}:{user:User;onGo:(s:Section)=>void}) {
   const ready=useQuery({queryKey:['health'],queryFn:()=>api<{status:string}>('/health/ready'),refetchInterval:30000})
-  const notices=useQuery({queryKey:['notices'],queryFn:()=>api<Notice[]>('/notifications'),refetchInterval:5000})
+  const notices=useNotificationFeed(user.id)
   const client=useQueryClient()
-  const read=useMutation({mutationFn:(id:string)=>api('/notifications/'+id+'/read','POST',{}),onSuccess:()=>client.invalidateQueries({queryKey:['notices']})})
+  const read=useMutation({mutationFn:(id:string)=>api('/notifications/'+id+'/read','POST',{}),onSuccess:()=>client.invalidateQueries({queryKey:['notices',user.id]})})
   return <><section className="welcome"><div><p className="eyebrow">一起积累，持续理解</p><h2>{user.display_name}，欢迎来到知页。</h2><p>你的笔记空间已经准备好。新建一页，记录正在学习的想法。</p><button className="primary" onClick={()=>onGo('notes')}>打开我的笔记<ArrowUpRight size={17}/></button></div><div className="welcome-mark" aria-hidden="true"><BookOpen size={100} strokeWidth={1}/><span>每一页，都算数。</span></div></section>
     <div className="status-grid"><div className="status-card"><ShieldCheck/><span>账户身份</span><strong>{user.role==='admin'?'管理员':'学习成员'}</strong><small>邀请制 · 私人空间</small></div><div className="status-card"><Activity/><span>系统连接</span><strong>{ready.isPending?'检查中':ready.isError?'暂不可用':'正常'}</strong><small>账户与数据库服务</small></div><div className="status-card"><KeyRound/><span>模型服务</span><strong>统一配置</strong><small>登录成员共用 · 模型设置查看状态</small></div></div>
-    <div className="home-grid"><div className="panel"><div className="panel-heading"><h3>空间建设进度</h3><span className="badge active">基础已就绪</span></div><p className="muted">按阶段开放，让每个功能都能真正使用。</p>{[{n:'01',t:'账户与系统基础',s:'已完成',done:true},{n:'02',t:'笔记管理与 AI 对话',s:'笔记与 PDF 对话已开放',done:false},{n:'03',t:'搜索、卡片与复习',s:'搜索、学习卡片与复习已开放',done:false},{n:'04',t:'好友与学习社区',s:'规划中',done:false}].map(x=><div className="roadmap-row" key={x.n}><span className={x.done?'step done':'step'}>{x.done?<Check size={16}/>:x.n}</span><strong>{x.t}</strong><span className="muted">{x.s}</span></div>)}</div>
-    <div className="panel"><div className="panel-heading"><h3>最近通知</h3><Bell size={19}/></div><ErrorMessage error={notices.error||read.error}/>{notices.data?.length?notices.data.map(n=><div className="notice" key={n.id}><span className={'notice-dot '+(n.read_at?'read':'')}/><div><strong>{n.message}</strong><small>{date(n.created_at)}</small>{n.target==='reviews'?<button className="text-button" onClick={()=>onGo('reviews')}>打开复习中心</button>:null}</div>{!n.read_at?<button className="text-button" disabled={read.isPending} onClick={()=>read.mutate(n.id)}>已读</button>:null}</div>):<Empty>这里会显示后台任务和学习提醒。<button className="text-button" onClick={()=>onGo('jobs')}>运行一次后台自检 <ChevronRight size={15}/></button></Empty>}</div></div>
+    <div className="home-grid"><div className="panel"><div className="panel-heading"><h3>空间建设进度</h3><span className="badge active">基础已就绪</span></div><p className="muted">按阶段开放，让每个功能都能真正使用。</p>{[{n:'01',t:'账户与系统基础',s:'已完成',done:true},{n:'02',t:'笔记管理与 AI 对话',s:'笔记与 PDF 对话已开放',done:false},{n:'03',t:'搜索、卡片与复习',s:'搜索、学习卡片与复习已开放',done:false},{n:'04',t:'好友与学习社区',s:'好友、私聊与社区已开放',done:false}].map(x=><div className="roadmap-row" key={x.n}><span className={x.done?'step done':'step'}>{x.done?<Check size={16}/>:x.n}</span><strong>{x.t}</strong><span className="muted">{x.s}</span></div>)}</div>
+    <div className="panel"><div className="panel-heading"><h3>最近通知</h3><Bell size={19}/></div><ErrorMessage error={notices.error||read.error}/>{notices.data?.length?notices.data.map(n=><div className="notice" key={n.id}><span className={'notice-dot '+(n.read_at?'read':'')}/><div><strong>{n.message}</strong><small>{date(n.created_at)}</small>{n.target==='reviews'?<button className="text-button" onClick={()=>onGo('reviews')}>打开复习中心</button>:null}</div>{!n.read_at?<button className="text-button" disabled={read.isPending} onClick={()=>read.mutate(n.id)}>已读</button>:null}</div>):<Empty>这里会显示后台任务和学习提醒。<button className="text-button" onClick={()=>onGo('jobs')}>运行一次后台自检 <ChevronRight size={15}/></button></Empty>}{notices.catchingUp?<p role="status">正在继续补拉通知…<button className="text-button" onClick={()=>void notices.refetch()}>继续补拉通知</button></p>:null}<NotificationHistory owner={user.id} onRead={id=>read.mutate(id)} readPending={read.isPending}/></div></div>
   </>
 }
 
 export default function App() {
   const client=useQueryClient()
   const session=useSyncExternalStore(authSession.subscribe,authSession.snapshot)
+  const explicitNavigation=useRef(false),startupApplied=useRef('')
+  const [postToOpen,setPostToOpen]=useState('')
+  const consumePost=useCallback(()=>setPostToOpen(''),[])
   const [section,setSection]=useState<Section>('home')
+  const [offlineOpen,setOfflineOpen]=useState(false)
+  useChatRealtime(session.phase==='active'&&!offlineOpen?session.owner||'':'')
+  const [socialInitialTab,setSocialInitialTab]=useState<'friends'|'shares'>('friends')
+  const [peerToOpen,setPeerToOpen]=useState('')
+  const consumePeer=useCallback(()=>setPeerToOpen(''),[])
   const [noteToOpen,setNoteToOpen]=useState('')
   const [reviewToOpen,setReviewToOpen]=useState('')
   const [quizToOpen,setQuizToOpen]=useState('')
@@ -118,25 +143,42 @@ export default function App() {
       // Abort/remove old queries before any delayed response can repopulate a private screen.
       void client.cancelQueries();client.clear()
       if(old.owner&&(next.phase==='closing'||next.phase==='anonymous'||next.owner!==old.owner)&&!clearTabNavigation(old.owner))setStorageNotice('界面已锁定，但浏览器未允许清理当前标签页记录。')
-      setNoteToOpen('');setReviewToOpen('');setQuizToOpen('');setTextSelection(null);setSection('home')
+      if(old.owner&&(next.phase==='closing'||next.phase==='anonymous'||next.owner!==old.owner))startupDefaults.clear(old.owner)
+      explicitNavigation.current=false;startupApplied.current='';setPostToOpen('')
+      setPeerToOpen('');setNoteToOpen('');setReviewToOpen('');setQuizToOpen('');setTextSelection(null);setSection('home')
     })
     const stop=startSessionSync(()=>{void client.invalidateQueries({queryKey:['me']})})
     return()=>{stop();unsubscribe()}
   },[client])
-  const me=useQuery({queryKey:['me',session.generation],queryFn:async()=>{const ticket=authSession.ticket();const user=await api<User>('/auth/me');authSession.verify(user.id,ticket);return user},enabled:session.phase==='checking'||session.phase==='active'})
-  useEffect(()=>{if(me.data?.id){if(wasNotesOpen(me.data.id))setSection('notes');else if(wasChatOpen(me.data.id))setSection('chat')}},[me.data?.id])
-  function go(next:Section){if(me.data)rememberSection(me.data.id,next);setNoteToOpen('');setReviewToOpen('');setQuizToOpen('');setTextSelection(null);setSection(next)}
-  const logout=useMutation({mutationFn:async()=>{const closing=authSession.beginLogout(authSession.ticket());try{await logoutTab()}finally{if(authSession.current(closing))clearSession()}}})
+  const me=useQuery({queryKey:['me',session.generation],queryFn:async()=>{const ticket=authSession.ticket();const user=await api<User>('/auth/me');authSession.verify(user.id,ticket);return user},enabled:!offlineOpen&&(session.phase==='checking'||session.phase==='active')})
+  const homePreferences=usePersonalization(me.data?.id||'',session.id)
+  useEffect(()=>{
+    const owner=me.data?.id
+    if(!owner||session.phase!=='active'||session.owner!==owner)return
+    const identity=owner+':'+session.id
+    if(startupApplied.current===identity)return
+    const restoredNotes=wasNotesOpen(owner),restoredChat=wasChatOpen(owner)
+    if(!shouldApplyHomeDefault({explicitNavigation:explicitNavigation.current,restoredNotes,restoredChat,alreadyApplied:startupDefaults.has(owner)})){
+      startupApplied.current=identity
+      startupDefaults.mark(owner)
+      if(!explicitNavigation.current){if(restoredNotes)setSection('notes');else if(restoredChat)setSection('chat')}
+      return
+    }
+    if(homePreferences.data){startupApplied.current=identity;startupDefaults.mark(owner);const next=homeSection(homePreferences.data.default_section);if(next)setSection(next)}
+  },[me.data?.id,session.id,session.phase,session.owner,homePreferences.data])
+  function go(next:Section){explicitNavigation.current=true;setPostToOpen('');if(next==='social')setSocialInitialTab('friends');if(me.data){startupDefaults.mark(me.data.id);rememberSection(me.data.id,next)}setNoteToOpen('');setReviewToOpen('');setQuizToOpen('');setTextSelection(null);setSection(next)}
+  const logout=useMutation({mutationFn:async()=>{const ticket=authSession.ticket();const {confirmOfflineLogout}=await import('./features/offline/logout-guard.ts');if(!await confirmOfflineLogout(user!.id))return;if(!authSession.current(ticket,user!.id))return;const closing=authSession.beginLogout(ticket);try{await cancelPushForLogout(user!.id);await logoutTab()}finally{if(authSession.current(closing))clearSession()}}})
   if(session.phase==='closing')return <div className="loading">正在退出登录，已暂停本机编辑…</div>
-  if(session.phase==='anonymous')return <AuthScreen notice={storageNotice} error={logout.error}/>
-  if(me.isPending) return <div className="loading">正在连接你的学习空间…</div>
+  if(offlineOpen)return <Suspense fallback={<main className="offline-entry"><p>正在打开本机离线空间…</p></main>}><OfflineEntry onClose={()=>setOfflineOpen(false)}/></Suspense>
+  if(session.phase==='anonymous')return <AuthScreen notice={storageNotice} error={logout.error} onOffline={()=>setOfflineOpen(true)}/>
+  if(me.isPending) return <div className="loading">正在连接你的学习空间…<button className="secondary" onClick={()=>setOfflineOpen(true)}>解锁本机离线资料</button></div>
   if(!me.data || (me.error instanceof ApiError&&me.error.status===401)) {
-    if(me.error instanceof ApiError&&me.error.status===401) return <AuthScreen/>
-    return <main className="connection-error"><BookOpen size={36}/><h2>暂时无法连接学习空间</h2><ErrorMessage error={me.error}/><button className="primary" onClick={()=>me.refetch()}>重新连接</button></main>
+    if(me.error instanceof ApiError&&me.error.status===401) return <AuthScreen onOffline={()=>setOfflineOpen(true)}/>
+    return <main className="connection-error"><BookOpen size={36}/><h2>暂时无法连接学习空间</h2><ErrorMessage error={me.error}/><button className="primary" onClick={()=>me.refetch()}>重新连接</button><button className="secondary" onClick={()=>setOfflineOpen(true)}>解锁本机离线资料</button></main>
   }
   if(session.phase!=='active'||session.owner!==me.data.id)return <div className="loading">正在核对登录状态…</div>
   const user=me.data
-  const nav=[{id:'home' as const,label:'空间概览',icon:LayoutDashboard},{id:'notes' as const,label:'我的笔记',icon:BookOpen},{id:'cards' as const,label:'学习卡片',icon:BookOpen},{id:'quizzes' as const,label:'学习测验',icon:BookOpen},{id:'reviews' as const,label:'复习中心',icon:BookOpen},{id:'learning' as const,label:'学习统计',icon:Activity},{id:'preferences' as const,label:'学习提醒',icon:Bell},{id:'chat' as const,label:'AI 对话',icon:MessageSquare},{id:'ai' as const,label:'模型设置',icon:KeyRound},{id:'jobs' as const,label:'后台任务',icon:Activity},...(user.role==='admin'?[{id:'invites' as const,label:'邀请码',icon:Ticket},{id:'users' as const,label:'成员管理',icon:Users},{id:'audit' as const,label:'操作记录',icon:ShieldCheck}]:[])]
-  const titles:Record<Section,string>={home:'空间概览',notes:'我的笔记',cards:'学习卡片',quizzes:'学习测验',reviews:'复习中心',learning:'学习统计',preferences:'学习提醒',chat:'AI 对话',ai:'模型设置',invites:'邀请码管理',users:'成员管理',jobs:'后台任务',audit:'操作记录'}
-  return <LearningActivityProvider key={user.id+session.id} owner={user.id} sessionId={session.id}><div className="app-shell"><aside className="sidebar"><div className="brand"><BookOpen/> 知页 <span>AI NOTES</span></div><div className="workspace-chip"><span className="workspace-avatar">知</span><div><strong>我们的学习空间</strong><small>个人与朋友 · 邀请制</small></div></div><p className="nav-label">工作空间</p><nav>{nav.map(n=><button key={n.id} className={section===n.id?'nav-item selected':'nav-item'} onClick={()=>go(n.id)}><n.icon size={19}/>{n.label}</button>)}</nav><div className="sidebar-note"><span className="badge">正在建设</span><p>从一页笔记开始，<br/>积累自己的知识世界。</p></div><div className="account"><span className="avatar">{user.display_name.slice(0,1)}</span><div><strong>{user.display_name}</strong><small>@{user.username}</small></div><button aria-label="退出登录" className="icon-button" disabled={logout.isPending} onClick={()=>logout.mutate()}><LogOut size={17}/></button></div></aside><main className="main"><header><div><span className="muted">工作空间</span><ChevronRight size={13}/><strong>{titles[section]}</strong></div><button className="icon-button" aria-label="刷新当前数据" onClick={()=>client.invalidateQueries()}><RefreshCw size={17}/></button></header><div className="content"><div className="page-heading"><div><p className="eyebrow">YOUR LEARNING SPACE</p><h1>{titles[section]}</h1></div><span className="version">M2 · 学习空间</span></div><ErrorMessage error={logout.error}/>{section==='home'?<Home user={user} onGo={go}/>:section==='notes'?<Suspense fallback={<div className="empty">正在打开笔记空间…</div>}><NotesWorkspace owner={user.id} initialNoteId={noteToOpen} onGoReview={id=>{go('reviews');setReviewToOpen(id||'')}} onAskText={selection=>{go('chat');setTextSelection(selection)}}/></Suspense>:section==='cards'?<Suspense fallback={<div className="empty">正在打开学习卡片…</div>}><CardWorkspace owner={user.id} onOpenNote={id=>{rememberNote(user.id,id);go('notes');setNoteToOpen(id)}}/></Suspense>:section==='quizzes'?<Suspense fallback={<div className="empty">正在打开学习测验…</div>}><QuizWorkspace owner={user.id} initialQuizId={quizToOpen} onGoReview={id=>{go('reviews');setReviewToOpen(id||'')}} onOpenNote={id=>{rememberNote(user.id,id);go('notes');setNoteToOpen(id)}}/></Suspense>:section==='reviews'?<Suspense fallback={<div className="empty">正在打开复习中心…</div>}><ReviewCenter owner={user.id} initialPlanId={reviewToOpen} onOpenQuiz={id=>{go('quizzes');setQuizToOpen(id)}} onOpenNote={id=>{rememberNote(user.id,id);go('notes');setNoteToOpen(id)}}/></Suspense>:section==='learning'?<Suspense fallback={<div className="empty">正在读取学习统计…</div>}><LearningOverview owner={user.id}/></Suspense>:section==='preferences'?<Suspense fallback={<div className="empty">正在读取学习提醒…</div>}><LearningPreferences owner={user.id}/></Suspense>:section==='chat'?<Suspense fallback={<div className="empty">正在打开 AI 对话…</div>}><AiChat owner={user.id} initialTextSelection={textSelection||undefined} onTextSelectionConsumed={requestKey=>setTextSelection(current=>current?.requestKey===requestKey?null:current)} onOpenNote={id=>{rememberNote(user.id,id);go('notes');setNoteToOpen(id)}}/></Suspense>:section==='ai'?<Suspense fallback={<div className="empty">正在读取模型设置…</div>}><AiSettings owner={user.id} admin={user.role==='admin'}/></Suspense>:section==='invites'&&user.role==='admin'?<InvitesPanel/>:section==='users'&&user.role==='admin'?<UsersPanel/>:section==='audit'&&user.role==='admin'?<AuditPanel/>:<JobsPanel admin={user.role==='admin'}/>}<footer>知页 · 给知识一个可以生长的地方</footer></div></main></div></LearningActivityProvider>
+  const nav=[{id:'home' as const,label:'空间概览',icon:LayoutDashboard},{id:'notes' as const,label:'我的笔记',icon:BookOpen},{id:'cards' as const,label:'学习卡片',icon:BookOpen},{id:'quizzes' as const,label:'学习测验',icon:BookOpen},{id:'reviews' as const,label:'复习中心',icon:BookOpen},{id:'learning' as const,label:'学习统计',icon:Activity},{id:'preferences' as const,label:'学习提醒',icon:Bell},{id:'chat' as const,label:'AI 对话',icon:MessageSquare},{id:'social' as const,label:'好友与分享',icon:Users},{id:'messages' as const,label:'私聊消息',icon:MessageSquare},{id:'community' as const,label:'学习社区',icon:BookOpen},{id:'profile' as const,label:'个人设置',icon:Users},{id:'ai' as const,label:'模型设置',icon:KeyRound},{id:'jobs' as const,label:'后台任务',icon:Activity},...(user.role==='admin'?[{id:'invites' as const,label:'邀请码',icon:Ticket},{id:'users' as const,label:'成员管理',icon:Users},{id:'audit' as const,label:'操作记录',icon:ShieldCheck}]:[])]
+  const titles:Record<Section,string>={home:'空间概览',social:'好友与分享',messages:'私聊消息',community:'学习社区',profile:'个人资料与隐私',notes:'我的笔记',cards:'学习卡片',quizzes:'学习测验',reviews:'复习中心',learning:'学习统计',preferences:'学习提醒',chat:'AI 对话',ai:'模型设置',invites:'邀请码管理',users:'成员管理',jobs:'后台任务',audit:'操作记录'}
+  return <LearningActivityProvider key={user.id+session.id} owner={user.id} sessionId={session.id}><div className="app-shell"><aside className="sidebar"><div className="brand"><BookOpen/> 知页 <span>AI NOTES</span></div><div className="workspace-chip"><span className="workspace-avatar">知</span><div><strong>我们的学习空间</strong><small>个人与朋友 · 邀请制</small></div></div><p className="nav-label">工作空间</p><nav>{nav.map(n=><button key={n.id} className={section===n.id?'nav-item selected':'nav-item'} onClick={()=>go(n.id)}><n.icon size={19}/>{n.label}</button>)}<button className="nav-item" onClick={()=>setOfflineOpen(true)}><BookOpen size={19}/>本机离线空间</button></nav><div className="sidebar-note"><span className="badge">正在建设</span><p>从一页笔记开始，<br/>积累自己的知识世界。</p></div><div className="account"><span className="avatar">{user.display_name.slice(0,1)}</span><div><strong>{user.display_name}</strong><small>@{user.username}</small></div><button aria-label="退出登录" className="icon-button" disabled={logout.isPending} onClick={()=>logout.mutate()}><LogOut size={17}/></button></div></aside><main className="main"><header><div><span className="muted">工作空间</span><ChevronRight size={13}/><strong>{titles[section]}</strong></div><button className="icon-button" aria-label="刷新当前数据" onClick={()=>client.invalidateQueries()}><RefreshCw size={17}/></button></header><div className="content"><div className="page-heading"><div><p className="eyebrow">YOUR LEARNING SPACE</p><h1>{titles[section]}</h1></div><span className="version">M4 · 学习空间</span></div><ErrorMessage error={logout.error}/>{section==='home'?<><Home user={user} onGo={go}/><Suspense fallback={<p>正在读取工作台…</p>}><Workbench key={user.id+':'+session.id} owner={user.id} onReadPost={id=>{go('community');setPostToOpen(id)}} onGo={next=>{if(next==='shares'){go('social');setSocialInitialTab('shares')}else go(next)}}/></Suspense></>:section==='social'?<Suspense fallback={<p>正在打开好友空间…</p>}><SocialWorkspace key={user.id+':'+socialInitialTab} owner={user.id} initialTab={socialInitialTab} onMessage={id=>{setPeerToOpen(id);go('messages')}}/></Suspense>:section==='messages'?<Suspense fallback={<p>正在打开私聊…</p>}><ChatWorkspace owner={user.id} peerId={peerToOpen} onPeerConsumed={consumePeer} onFriends={()=>go('social')}/></Suspense>:section==='profile'?<Suspense fallback={<p>正在打开个人设置…</p>}><ProfileSettings owner={user.id}/><PwaSettings owner={user.id}/><OfflineSettings owner={user.id} onOpen={()=>setOfflineOpen(true)}/><ArchiveHistory owner={user.id}/></Suspense>:section==='community'?<Suspense fallback={<p>正在打开学习社区…</p>}><CommunityWorkspace key={user.id+':'+session.id} owner={user.id} admin={user.role==='admin'} initialPostId={postToOpen} onPostConsumed={consumePost}/></Suspense>:section==='notes'?<Suspense fallback={<div className="empty">正在打开笔记空间…</div>}><NotesWorkspace owner={user.id} initialNoteId={noteToOpen} onGoReview={id=>{go('reviews');setReviewToOpen(id||'')}} onAskText={selection=>{go('chat');setTextSelection(selection)}}/></Suspense>:section==='cards'?<Suspense fallback={<div className="empty">正在打开学习卡片…</div>}><CardWorkspace owner={user.id} onOpenNote={id=>{rememberNote(user.id,id);go('notes');setNoteToOpen(id)}}/></Suspense>:section==='quizzes'?<Suspense fallback={<div className="empty">正在打开学习测验…</div>}><QuizWorkspace owner={user.id} initialQuizId={quizToOpen} onGoReview={id=>{go('reviews');setReviewToOpen(id||'')}} onOpenNote={id=>{rememberNote(user.id,id);go('notes');setNoteToOpen(id)}}/></Suspense>:section==='reviews'?<Suspense fallback={<div className="empty">正在打开复习中心…</div>}><ReviewCenter owner={user.id} initialPlanId={reviewToOpen} onOpenQuiz={id=>{go('quizzes');setQuizToOpen(id)}} onOpenNote={id=>{rememberNote(user.id,id);go('notes');setNoteToOpen(id)}}/></Suspense>:section==='learning'?<Suspense fallback={<div className="empty">正在读取学习统计…</div>}><LearningOverview owner={user.id}/></Suspense>:section==='preferences'?<Suspense fallback={<div className="empty">正在读取学习提醒…</div>}><LearningPreferences owner={user.id}/></Suspense>:section==='chat'?<Suspense fallback={<div className="empty">正在打开 AI 对话…</div>}><AiChat owner={user.id} initialTextSelection={textSelection||undefined} onTextSelectionConsumed={requestKey=>setTextSelection(current=>current?.requestKey===requestKey?null:current)} onOpenNote={id=>{rememberNote(user.id,id);go('notes');setNoteToOpen(id)}}/></Suspense>:section==='ai'?<Suspense fallback={<div className="empty">正在读取模型设置…</div>}><AiSettings owner={user.id} admin={user.role==='admin'}/></Suspense>:section==='invites'&&user.role==='admin'?<InvitesPanel/>:section==='users'&&user.role==='admin'?<UsersPanel/>:section==='audit'&&user.role==='admin'?<AuditPanel/>:<JobsPanel admin={user.role==='admin'}/>}<footer>知页 · 给知识一个可以生长的地方</footer></div></main></div></LearningActivityProvider>
 }

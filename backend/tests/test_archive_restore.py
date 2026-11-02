@@ -187,7 +187,8 @@ def restore_database(tmp_path_factory):
             "APP_ENV": "development",
         }
         migration = subprocess.run(
-            [sys.executable, "-m", "alembic", "upgrade", "head"],
+            [sys.executable, "-c", "from app.shared.config import Settings; Settings.model_config['env_file']=None; "
+             "from alembic import command; from alembic.config import Config; command.upgrade(Config('alembic.ini'),'head')"],
             cwd=ROOT / "backend", env=environment, capture_output=True, text=True,
             encoding="utf-8", errors="replace", timeout=90,
         )
@@ -261,14 +262,28 @@ def _rewrite_archive(source, destination, change):
 
 
 @pytest.mark.parametrize("empty", [False, True])
-@pytest.mark.parametrize("version", [1, 2])
+@pytest.mark.parametrize("version", [1, 2, 3, 4])
 def test_restore_legacy_v1_archive_into_current_empty_schema(restore_tool, archive_file, target, tmp_path, empty, version):
     path = tmp_path / f"legacy-v{version}.zip"
     def legacy(manifest, collections):
         manifest["version"] = version
+        collections.pop("ai_tool_calls")
+        collections.pop("user_home_preferences")
+        collections.pop("learning_analyses")
+        from app.modules.ai.archive import RUN_FIELDS
+        for run in collections["ai_runs"]:
+            for field in RUN_FIELDS:
+                run.pop(field)
         from app.modules.exports.learning_archive import FIELDS as learning
-        for model in learning:
-            collections.pop(model.__tablename__)
+        from app.modules.exports.social_archive import FIELDS as social
+        if version < 4:
+            for model in social:
+                collections.pop(model.__tablename__)
+        for page in collections["note_pages"]:
+            page.pop("deleted_at")
+        if version < 3:
+            for model in learning:
+                collections.pop(model.__tablename__)
         if version == 1:
             collections.pop("ocr_documents")
     _rewrite_archive(archive_file, path, legacy)
@@ -282,7 +297,7 @@ def test_restore_legacy_v1_archive_into_current_empty_schema(restore_tool, archi
         with zipfile.ZipFile(path, "w") as archive:
             archive.writestr("manifest.json", json.dumps(manifest))
             archive.writestr("data.json", raw)
-    assert ("ocr_documents" in restore_tool._load_verifier().verify_archive(path)) == (version == 2)
+    assert ("ocr_documents" in restore_tool._load_verifier().verify_archive(path)) == (version >= 2)
     _restore(restore_tool, path, target)
     counts = _counts(target)
     assert counts["users"] == 1 and counts["ocr_documents"] == 0
@@ -329,7 +344,7 @@ def test_ocr_archive_restore_preserves_correction_frozen_source_and_no_replay(
     with exports.create_archive(export_account.owner, export_account.session) as stream, path.open("wb") as output:
         shutil.copyfileobj(stream, output)
     manifest, collections = _metadata(path)
-    assert manifest["version"] == 3 and len(collections["ocr_documents"]) == 1
+    assert manifest["version"] == 5 and len(collections["ocr_documents"]) == 1
     with zipfile.ZipFile(path) as archive:
         metadata = archive.read("data.json")
     assert b"PRIVATE_OCR_INSTRUCTION" not in metadata and b"PRIVATE_OCR_MESSAGES" not in metadata
@@ -358,7 +373,7 @@ def test_restore_roundtrip_preserves_all_collections_assets_and_live_readers(
     assert result == {"owner_id": str(export_account.owner), "counts": manifest["counts"],
                       "normalized_steps": 0, "synthesized_jobs": 0, "objects": 7}
     counts = _counts(target)
-    assert len(manifest["counts"]) == 32
+    assert len(manifest["counts"]) == 37
     assert {name: counts[name] for name in TABLES} == manifest["counts"]
     assert counts["users"] == 1 and counts["upload_sessions"] == 1
     assert not any(counts[name] for name in ("sessions", "ai_credentials", "password_resets",

@@ -20,9 +20,9 @@ def is_visual(source):
     return source is not None and kind(source) in {"image", "pdf"}
 
 
-def validate(db, owner, source):
+def validate(db, owner, source, *, historical=False):
     implementation = {"image": image_context, "pdf": pdf_context, "text": text_context}[kind(source)]
-    return implementation.validate(db, owner, source)
+    return implementation.validate(db, owner, source, **({"historical": historical} if not is_text(source) else {}))
 
 
 def public_source(source):

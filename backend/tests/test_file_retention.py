@@ -140,6 +140,16 @@ def test_historical_visual_page_identity_is_retained_after_current_page_disappea
     assert references.historical_key in collect()["keys"]
 
 
+def test_pdf_frozen_page_number_above_200_is_still_rejected(references):
+    with SessionLocal.begin() as db:
+        run = db.get(AiRun, references.runs[0])
+        source = deepcopy(run.source)
+        source["pages"][0]["number"] = 201
+        run.source = source
+    with pytest.raises(RetentionError, match="retention_reference_invalid"):
+        collect()
+
+
 @pytest.mark.parametrize("kind", ["unknown_source", "bad_page", "bad_region", "bad_text", "bad_version", "foreign_version", "foreign_key"])
 def test_damaged_or_foreign_reference_aborts_entire_collection(references, kind):
     with SessionLocal.begin() as db:

@@ -132,10 +132,10 @@ def read_archive(account):
 
 def test_complete_private_export_preserves_versions_pdf_crops_and_checksums(account, tmp_path):
     manifest, collections, payloads = read_archive(account)
-    assert manifest["format"] == "ai-notes-export" and manifest["version"] == 3
+    assert manifest["format"] == "ai-notes-export" and manifest["version"] == 5
     assert manifest["owner"]["id"] == str(account.owner)
     assert manifest["resume_processing"] is False
-    assert len(collections) == 32
+    assert len(collections) == 37
     assert manifest["counts"] == {table: len(rows) for table, rows in collections.items()}
     assert len(collections["notes"]) == 4
     assert next(n for n in collections["notes"] if n["id"] == str(account.trash))["deleted_at"]

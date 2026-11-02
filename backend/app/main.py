@@ -1,4 +1,5 @@
 import logging
+from contextlib import asynccontextmanager
 import time
 from uuid import uuid4
 from fastapi import FastAPI, Request
@@ -27,7 +28,20 @@ from app.modules.learning.card_router import router as cards_router
 from app.modules.learning.review_router import router as reviews_router
 
 log = logging.getLogger("notes.api")
-app = FastAPI(title="AI Notes M0", version="0.1.0")
+@asynccontextmanager
+async def lifespan(app):
+    from app.modules.social.realtime_hub import Hub
+    hub = Hub()
+    await hub.start()
+    try:
+        # ASGI lifespan state is copied into each request scope. Keeping the hub
+        # here avoids one TestClient lifespan overwriting another loop's hub.
+        yield {"realtime_hub": hub}
+    finally:
+        await hub.stop()
+
+
+app = FastAPI(title="AI Notes M0", version="0.1.0", lifespan=lifespan)
 
 
 class ErrorOut(BaseModel):
@@ -121,3 +135,25 @@ from app.modules.learning.reminder_router import router as reminders_router
 app.include_router(reminders_router, prefix="/api/v1", responses=errors)
 from app.modules.learning.stats_router import router as stats_router
 app.include_router(stats_router, prefix="/api/v1", responses=errors)
+
+from app.modules.social.router import router as social_router
+from app.modules.social.chat_router import router as private_chat_router
+from app.modules.social.realtime import router as realtime_router
+m3_errors = {**errors, 413: {"model": ErrorOut, "description": "Content Too Large"}, 503: {"model": ErrorOut}}
+app.include_router(social_router, prefix="/api/v1", responses=m3_errors)
+app.include_router(private_chat_router, prefix="/api/v1", responses=m3_errors)
+app.include_router(realtime_router, prefix="/api/v1", responses=m3_errors)
+from app.modules.community.router import router as community_router
+app.include_router(community_router, prefix="/api/v1", responses=m3_errors)
+from app.modules.exports.social_router import router as recovered_history_router
+app.include_router(recovered_history_router, prefix="/api/v1", responses=m3_errors)
+from app.modules.notifications.router import router as push_router
+app.include_router(push_router, prefix="/api/v1", responses={**errors, 503: {"model": ErrorOut}})
+from app.modules.offline.router import router as offline_router
+app.include_router(offline_router, prefix="/api/v1", responses={
+    **errors, 413: {"model": ErrorOut, "description": "Content Too Large"},
+    503: {"model": ErrorOut},
+})
+
+from app.modules.personalization.router import router as personalization_router
+app.include_router(personalization_router, prefix="/api/v1", responses={**errors, 503: {"model": ErrorOut}})

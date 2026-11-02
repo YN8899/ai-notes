@@ -83,7 +83,7 @@ def save_snapshot(db, note):
             {"id": str(page.id), "file_id": str(page.file_id), "position": page.position,
              "revision": page.revision}
             for page in db.scalars(select(NotePage).where(NotePage.note_id == note.id,
-                                    NotePage.owner_id == note.owner_id).order_by(NotePage.position))
+                                    NotePage.owner_id == note.owner_id, NotePage.deleted_at.is_(None)).order_by(NotePage.position))
         ]
     db.add(NoteVersion(note_id=note.id, owner_id=note.owner_id, revision=note.revision, snapshot=snapshot))
 

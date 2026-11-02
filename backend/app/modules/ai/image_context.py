@@ -27,7 +27,7 @@ def notebook(db, owner, note_id):
     return note
 
 
-def pages(db, owner, note_id, page_id=None):
+def pages(db, owner, note_id, page_id=None, *, historical=False):
     query = (select(NotePage, File, FileVariant)
                           .join(File, NotePage.file_id == File.id)
                           .join(FileVariant, FileVariant.file_id == File.id).where(
@@ -36,6 +36,8 @@ def pages(db, owner, note_id, page_id=None):
                               File.status == "ready", FileVariant.kind == "reading"))
     if page_id is not None:
         query = query.where(NotePage.id == page_id)
+    if not historical:
+        query = query.where(NotePage.deleted_at.is_(None))
     return list(db.execute(query.order_by(NotePage.position).limit(1 if page_id is not None else PAGE_LIMIT + 1)))
 
 
@@ -43,7 +45,7 @@ def detail(db, owner, note_id):
     note = notebook(db, owner, note_id)
     count = db.scalar(select(func.count()).select_from(NotePage).where(
         NotePage.owner_id == owner, NotePage.note_id == note_id,
-        NotePage.pdf_page_number.is_(None)))
+        NotePage.pdf_page_number.is_(None), NotePage.deleted_at.is_(None)))
     if count > PAGE_LIMIT:
         raise AppError(422, "image_context_too_large", "本阶段图片提问最多支持每本 200 张图片，请拆分笔记后选择")
     ready = pages(db, owner, note_id)
@@ -77,14 +79,14 @@ def freeze(db, owner, data):
     return _freeze(db, owner, data)[0]
 
 
-def validate(db, owner, source):
+def validate(db, owner, source, *, historical=False):
     try:
         public = s.ImageSourceOut.model_validate(source)
         if len(public.pages) != 1 or (public.mode == "region") != (public.pages[0].region is not None):
             raise ValueError("invalid_image_source")
         frozen = source["pages"][0]
         note = notebook(db, owner, public.note_id)
-        actual = next(iter(pages(db, owner, note.id, public.pages[0].page_id)), None)
+        actual = next(iter(pages(db, owner, note.id, public.pages[0].page_id, historical=historical)), None)
         # Position and page revision may change when the owner reorders pages.
         # The saved original position is a citation label, never a lookup key.
         if not actual or (str(actual[1].id), actual[2].object_key, actual[2].bytes) != (

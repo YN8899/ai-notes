@@ -24,7 +24,7 @@ def image_notebooks(db: DB, user: CurrentUser):
                       .join(NotePage, NotePage.note_id == Note.id).join(File, File.id == NotePage.file_id)
                       .join(FileVariant, FileVariant.file_id == File.id).where(
                           Note.owner_id == user.id, Note.kind == "image", Note.deleted_at.is_(None),
-                          NotePage.owner_id == user.id, NotePage.pdf_page_number.is_(None),
+                          NotePage.owner_id == user.id, NotePage.pdf_page_number.is_(None), NotePage.deleted_at.is_(None),
                           File.owner_id == user.id, File.status == "ready", FileVariant.kind == "reading")
                       .group_by(Note.id).order_by(Note.updated_at.desc()).limit(100))
     return [image_s.ImageNotebookOut(**dict(row._mapping)) for row in rows]
@@ -45,7 +45,10 @@ def pdf_notebooks(db: DB, user: CurrentUser):
     records = db.execute(select(Note, PdfImport).join(PdfImport, PdfImport.note_id == Note.id).where(
         Note.owner_id == user.id, PdfImport.owner_id == user.id, Note.deleted_at.is_(None), PdfImport.status == "ready")
         .order_by(Note.updated_at.desc()).limit(100))
-    return [s.PdfNotebookOut(id=note.id, title=note.title, revision=note.revision, page_count=item.page_count) for note, item in records]
+    return [s.PdfNotebookOut(id=note.id, title=note.title, revision=note.revision,
+        page_count=db.scalar(select(func.count()).select_from(NotePage).where(NotePage.note_id == note.id,
+            NotePage.owner_id == user.id, NotePage.pdf_page_number.is_not(None), NotePage.deleted_at.is_(None))))
+        for note, item in records]
 
 
 @router.get("/ai/pdf-notebooks/{note_id}", response_model=s.PdfNotebookDetail)
@@ -64,7 +67,7 @@ def source_page(run_id: UUID, page_id: UUID, db: DB, user: CurrentUser):
     source = row.source
     if source is None or source_context.is_text(source):
         raise AppError(404, "source_not_found", "这次回答没有引用此页")
-    note = source_context.validate(db, user.id, source) if source else None
+    note = source_context.validate(db, user.id, source, historical=True) if source else None
     page = next((page for page in source["pages"] if page["page_id"] == str(page_id)), None) if source else None
     if not page:
         raise AppError(404, "source_not_found", "这次回答没有引用此页")
@@ -90,7 +93,10 @@ def list_conversations(db: DB, user: CurrentUser):
     from app.modules.learning.quiz_models import QuizGeneration, QuizGrading
     quiz_generations = select(AiRun.conversation_id).join(QuizGeneration, QuizGeneration.run_id == AiRun.id)
     quiz_gradings = select(AiRun.conversation_id).join(QuizGrading, QuizGrading.run_id == AiRun.id)
+    from app.modules.personalization.models import LearningAnalysis
+    analyses = select(AiRun.conversation_id).join(LearningAnalysis, LearningAnalysis.run_id == AiRun.id)
     return list(db.scalars(select(AiConversation).where(AiConversation.owner_id == user.id)
+                           .where(AiConversation.id.not_in(analyses))
                            .where(AiConversation.id.not_in(quiz_generations))
                            .where(AiConversation.id.not_in(quiz_gradings))
                            .where(AiConversation.id.not_in(internal))
@@ -133,7 +139,7 @@ def cancel(run_id: UUID, db: DB, user: CurrentUser):
     row = db.scalar(select(AiRun).where(AiRun.id == run_id, AiRun.owner_id == user.id).with_for_update())
     if not row:
         raise AppError(404, "run_not_found", "对话运行不存在")
-    if service.quiz_conversation(db, row.conversation_id):
+    if service.quiz_conversation(db, row.conversation_id) or service.reserved_analysis_conversation(db, row.conversation_id):
         raise AppError(404, "run_not_found", "对话运行不存在")
     service.readable_source(row.source)
     if row.status in service.ACTIVE:
@@ -177,3 +183,20 @@ def events(run_id: UUID, request: Request, db: DB, user: CurrentUser):
             await asyncio.sleep(0.4)
 
     return StreamingResponse(stream(), media_type="text/event-stream", headers={"X-Accel-Buffering": "no"})
+
+
+@router.post("/ai/tools/preview", response_model=s.ToolScopePreviewOut)
+def tool_scope_preview(data: s.ToolSelection, db: DB, user: CurrentUser):
+    from app.modules.ai import tools
+    scope = tools.freeze_scope(db, user.id, data)
+    return s.ToolScopePreviewOut(preview_hash=tools.preview_hash(data.tools, scope), tools=list(data.tools), scope=scope, note_count=len(scope["notes"]) if scope else 0)
+
+
+@router.get("/ai/runs/{run_id}/tools", response_model=s.ToolHistoryOut)
+def tool_history(run_id: UUID, db: DB, user: CurrentUser):
+    from app.modules.ai.models import AiToolCall, AiStep
+    row = service.get_run(db, user.id, run_id)
+    return s.ToolHistoryOut(provider=row.provider, model=row.model, tools=row.tools, scope=row.tool_scope,
+        calls=list(db.scalars(select(AiToolCall).where(AiToolCall.run_id == run_id, AiToolCall.owner_id == user.id)
+            .order_by(AiToolCall.position))),
+        attempts=list(db.scalars(select(AiStep).where(AiStep.run_id == run_id).order_by(AiStep.position))))

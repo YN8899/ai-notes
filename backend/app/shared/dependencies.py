@@ -31,7 +31,10 @@ def current_user(request: Request, db: DB):
         raise AppError(401, "login_required", "请先登录")
     stmt = select(User).where(User.id == session.user_id)
     if request.method not in {"GET", "HEAD", "OPTIONS"}:
-        stmt = stmt.with_for_update()
+        # Serialize mutations/disable/reset without blocking FK KEY SHARE locks
+        # on the peer when two members concurrently create social records.
+        # User identity keys are immutable; non-key changes remain exclusive.
+        stmt = stmt.with_for_update(key_share=True)
     user = db.scalar(stmt)
     # Refresh after the user lock: password reset / disabling might have revoked it.
     db.refresh(session)
@@ -42,6 +45,7 @@ def current_user(request: Request, db: DB):
         if not secrets.compare_digest(digest(supplied), session.csrf_hash):
             raise AppError(403, "csrf_invalid", "请求验证失败，请刷新页面")
     request.state.auth_session = session
+    db.info["auth_session_id"] = session.id
     return user
 
 

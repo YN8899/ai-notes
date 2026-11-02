@@ -17,8 +17,14 @@ def stop(*_):
 
 def execute(job):
     log.info("job_started job_id=%s", job["id"])
-    if job["kind"] in {"image.process", "pdf.import", "semantic.build"}:
-        if job["kind"] == "semantic.build":
+    if job["kind"] in {"image.process", "pdf.import", "semantic.build", "community.publish", "notification.push", "notification.test"}:
+        if job["kind"] == "notification.test":
+            from app.modules.notifications.service import process_test_job as process_job
+        elif job["kind"] == "notification.push":
+            from app.modules.notifications.service import process_job
+        elif job["kind"] == "community.publish":
+            from app.modules.community.publishing import process_job
+        elif job["kind"] == "semantic.build":
             from app.modules.search.semantic_service import process_job
         elif job["kind"] == "pdf.import":
             from app.modules.files.pdf_service import process_job
@@ -77,31 +83,43 @@ def tick():
 
 def main():
     parser = argparse.ArgumentParser()
+    from app.modules.jobs.lanes import ROLES, Runner, parse_roles
     parser.add_argument("--once", action="store_true")
+    parser.add_argument("--roles", default=None, help="comma-separated jobs,ai,outbox,push,maintenance; default all")
     args = parser.parse_args()
+    try:
+        roles = parse_roles(args.roles) if args.roles is not None else ROLES
+    except ValueError:
+        parser.error("invalid or duplicate worker role")
     logging.basicConfig(level=logging.INFO)
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)
-    last_maintenance = 0.0
-    while not stopping:
+    runner = Runner(roles, stopping=lambda: stopping, execute=execute, service=service, log=log)
+    if args.once:
+        # Backwards-compatible deterministic single sweep, no lane threads.
+        # Explicit --roles runs each selected role ONCE in listed order.
         try:
-            found = tick()
-            if time.monotonic() - last_maintenance > 60:
-                from app.modules.files.service import maintenance as file_maintenance
-                service.maintenance()
-                file_maintenance()
-                from app.modules.learning.reminder_service import dispatch as daily_reminders
-                daily_reminders()
-                last_maintenance = time.monotonic()
+            if args.roles is None:
+                tick()
+                runner.maintenance()
+            else:
+                for role in roles:
+                    if stopping:
+                        break
+                    runner.step(role)
         except Exception:
-            log.warning("worker_tick_failed")
-            if args.once:
-                raise SystemExit(1)
-            found = False
-        if args.once:
-            break
-        if not found:
-            time.sleep(1)
+            log.warning("worker_once_failed")
+            raise SystemExit(1)
+        return
+    # The unchanged `python -m app.worker` Compose command now USES lanes.
+    runner.start()
+    try:
+        while not stopping:
+            time.sleep(0.1)
+    finally:
+        pending = runner.close(timeout=5)
+        if pending:
+            log.warning("worker_shutdown_inflight count=%s", len(pending))
 
 
 if __name__ == "__main__":

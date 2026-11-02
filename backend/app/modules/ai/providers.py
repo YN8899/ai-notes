@@ -1,22 +1,15 @@
-"""Controlled DeepSeek discovery only: no chat generation, redirects or custom hosts."""
+"""Public metadata and bounded administrator connection checks."""
 from dataclasses import dataclass
 import json
 
-import httpx
-
-from app.modules.ai.schemas import AiModelOut, AiProviderOut
+from app.modules.ai import compatible
+from app.shared import outbound
 
 MODELS_URL = "https://api.deepseek.com/models"
-MODELS = (
-    AiModelOut(id="deepseek-flash", name="DeepSeek Flash", supports_text=True,
-               supports_vision=True, supports_streaming=True, supports_embedding=False),
-    AiModelOut(id="deepseek-v4-pro", name="DeepSeek V4 Pro", supports_text=True,
-               supports_vision=False, supports_streaming=True, supports_embedding=False),
-)
 
 
 def catalog():
-    return [AiProviderOut(id="deepseek", name="DeepSeek", models=list(MODELS))]
+    return compatible.public_catalog()
 
 
 @dataclass(frozen=True)
@@ -26,37 +19,29 @@ class CredentialCheck:
     models: tuple[str, ...] = ()
 
 
-def create_client():
-    return httpx.Client(timeout=httpx.Timeout(10, connect=5), follow_redirects=False, trust_env=False)
-
-
-def check_key(provider, secret):
-    if provider != "deepseek":
+def check_key(provider, secret=None, *, before_send=None):
+    profile = next((p for p in compatible.profiles() if p.id == provider and p.enabled), None)
+    if not profile:
         return CredentialCheck("unavailable", "provider_unsupported")
+    key = secret if secret is not None else profile.api_key.get_secret_value()
+    if not key:
+        return CredentialCheck("unavailable", "ai_not_configured")
     try:
-        with create_client() as client:
-            with client.stream("GET", MODELS_URL, headers={"Authorization": "Bearer " + secret,
-                                                         "Accept": "application/json"}) as response:
-                if response.status_code in {401, 403}:
-                    return CredentialCheck("invalid", "credential_rejected")
-                if response.status_code == 429:
-                    return CredentialCheck("unavailable", "provider_rate_limited")
-                if response.status_code != 200:
-                    return CredentialCheck("unavailable", "provider_unavailable")
-                content = bytearray()
-                for chunk in response.iter_bytes(chunk_size=8192):
-                    content.extend(chunk)
-                    if len(content) > 65536:
-                        return CredentialCheck("unavailable", "provider_invalid_response")
+        status, content = outbound.get_json(profile.base_url.get_secret_value() + "/models",
+            headers={"Authorization": "Bearer " + key, "Accept": "application/json"}, before_send=before_send)
+        if status in {401, 403}:
+            return CredentialCheck("invalid", "credential_rejected")
+        if status != 200:
+            return CredentialCheck("unavailable", "provider_rate_limited" if status == 429 else "provider_unavailable")
         data = json.loads(content)
         if not isinstance(data, dict) or not isinstance(data.get("data"), list):
-            return CredentialCheck("unavailable", "provider_invalid_response")
+            raise ValueError()
         available = {item["id"] for item in data["data"] if isinstance(item, dict) and isinstance(item.get("id"), str)}
-        supported = tuple(model.id for model in MODELS if model.id in available)
-        if not supported:
-            return CredentialCheck("unavailable", "models_unavailable")
-        return CredentialCheck("valid", "connected", supported)
-    except httpx.HTTPError:
-        return CredentialCheck("unavailable", "provider_unreachable")
-    except (ValueError, UnicodeError):
+        supported = tuple(model.id for model in profile.models if model.id in available)
+        return CredentialCheck("valid", "connected", supported) if supported else CredentialCheck("unavailable", "models_unavailable")
+    except (ValueError, UnicodeError, TypeError):
         return CredentialCheck("unavailable", "provider_invalid_response")
+    except outbound.EndpointUnavailable as error:
+        return CredentialCheck("unavailable", "provider_invalid_response" if error.reason == "invalid_response" else "provider_unreachable")
+    except Exception:
+        return CredentialCheck("unavailable", "provider_unreachable")

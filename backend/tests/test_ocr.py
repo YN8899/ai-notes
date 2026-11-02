@@ -1,3 +1,5 @@
+from app.shared import outbound
+from model_transport import install_model_transport
 """OCR is an explicit, private, at-most-once page operation, never an upload side effect."""
 from datetime import timedelta
 from uuid import UUID, uuid4
@@ -23,7 +25,8 @@ def private_config(monkeypatch, tmp_path):
     monkeypatch.setenv("DEEPSEEK_API_KEY", "ocr-fake-test-key")
     settings.cache_clear()
     monkeypatch.setattr(settings(), "storage_root", str(tmp_path / "private"))
-    monkeypatch.setattr(chat_provider, "create_client", lambda: (_ for _ in ()).throw(AssertionError("No live provider")))
+    monkeypatch.setattr(outbound.httpx, "HTTPTransport", lambda: (_ for _ in ()).throw(AssertionError("No live provider")))
+    monkeypatch.setattr(outbound, "resolve_public", lambda *a, **kw: ("8.8.8.8",))
     yield
     settings.cache_clear()
 
@@ -145,7 +148,7 @@ def test_activity_configuration_and_ambiguous_failure_no_retry(client, monkeypat
     body = request(client, nid)
     monkeypatch.setattr(settings(), 'deepseek_api_key', type(settings().deepseek_api_key)(''))
     assert create(client, body).status_code == 503
-    monkeypatch.setattr(settings(), 'deepseek_api_key', type(settings().deepseek_api_key)('fake-test'))
+    monkeypatch.setattr(settings(), 'deepseek_api_key', type(settings().deepseek_api_key)('fake-test-key-not-real-credential'))
     row = create(client, body).json()
     assert create(client, {**body, 'request_key': str(uuid4())}).status_code == 409
     with SessionLocal.begin() as db:

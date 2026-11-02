@@ -1,3 +1,5 @@
+import {ModelPicker} from '../ai/ModelPicker'
+import {defaultModel,modelReady,modelLabel,type ModelChoice} from '../ai/model-catalog'
 import {lazy,Suspense,useEffect,useMemo,useRef,useState,useSyncExternalStore} from 'react'
 import {useQuery,useQueryClient} from '@tanstack/react-query'
 import {api,ApiError,date,type AiCatalog} from '../../api'
@@ -14,7 +16,7 @@ import {ocrPreviewBody} from './ocr-preview'
 import '../ai/ai.css'
 import './ocr.css'
 
-type OcrDocument=components['schemas']['OcrDocumentOut']
+type OcrDocument=components['schemas']['OcrDocumentOut']&{provider?:string}
 type Props={noteId:string;ownerId:string;revision:number;page:PageOut;canMutate:boolean;beforeMutation:()=>boolean;onBusyChange:(busy:boolean)=>void}
 const pageSize=20
 const FormattedAnswer=lazy(()=>import('../ai/FormattedAnswer').then(module=>({default:module.FormattedAnswer})))
@@ -30,6 +32,8 @@ export function OcrPanel({noteId,ownerId,revision,page,canMutate,beforeMutation,
   const valid=authSession.current(ticket,ownerId)
   const [mode,setMode]=useState<'page'|'region'>('page'),[region,setRegion]=useState<Region|null>(null),[ready,setReady]=useState('')
   const [confirmation,setConfirmation]=useState<{revision:number;region:Region|null}|null>(null),[creating,setCreating]=useState(false),[error,setError]=useState<unknown>(null),[notice,setNotice]=useState('')
+  const [choice,setChoice]=useState<ModelChoice>(defaultModel)
+  useEffect(()=>setConfirmation(null),[choice])
   const [selected,setSelected]=useState(''),[offset,setOffset]=useState(0)
   const client=useQueryClient(),scope=['ocr',ownerId,ticket.id,noteId,page.id,page.file.id] as const
   const listKey=[...scope,'list',offset] as const
@@ -43,7 +47,7 @@ export function OcrPanel({noteId,ownerId,revision,page,canMutate,beforeMutation,
   useEffect(()=>{if(!valid){setConfirmation(null);setSelected('');setRegion(null);setError(null);setNotice('')}},[valid,session.generation])
   const previousRevision=useRef(revision)
   useEffect(()=>{if(previousRevision.current!==revision){previousRevision.current=revision;setConfirmation(null);void client.invalidateQueries({queryKey:['ocr',ownerId,ticket.id,noteId,page.id,page.file.id]})}},[revision,client,ownerId,ticket.id,noteId,page.id,page.file.id])
-  const configured=!!catalog.data?.platform_enabled&&catalog.data.providers.some(provider=>provider.models.some(model=>model.supports_vision))
+  const configured=modelReady(catalog.data,choice,{vision:true})
   const canCreate=valid&&canMutate&&configured&&!creating&&(mode==='page'||ready===page.file.id&&!!region)
 
   async function createAttempt() {
@@ -53,7 +57,7 @@ export function OcrPanel({noteId,ownerId,revision,page,canMutate,beforeMutation,
     posting.current=true;setCreating(true);setError(null);setNotice('')
     try {
       // Only this explicit click creates a request. Polls and refreshes are GETs.
-      const document=await api<OcrDocument>('/ocr/documents','POST',{note_id:noteId,page_id:page.id,revision:confirmation.revision,request_key:createUuid(),region:confirmation.region})
+      const document=await api<OcrDocument>('/ocr/documents','POST',{note_id:noteId,page_id:page.id,revision:confirmation.revision,request_key:createUuid(),region:confirmation.region,...choice})
       if(!authorized())return
       setConfirmation(null);setSelected(document.id);setOffset(0)
       client.setQueryData([...scope,'document',document.id],document)
@@ -76,6 +80,7 @@ export function OcrPanel({noteId,ownerId,revision,page,canMutate,beforeMutation,
     <p className="muted">识别文字与公式后请人工核对。原文和纠错稿分别保存，不会写入笔记正文。每次提交最多发起一次模型调用，可能产生费用。</p>
     <NoteError error={catalog.error}/>
     {catalog.isPending?<p role="status">正在读取共享模型设置…</p>:!configured?<p role="status" className="muted">文字识别暂不可用：共享视觉模型尚未配置，请联系管理员。图片仍可正常阅读。</p>:null}
+    <ModelPicker catalog={catalog.data} value={choice} onChange={value=>{setChoice(value);setConfirmation(null)}} vision disabled={!canMutate||creating} label="OCR 识别模型"/>
     <fieldset className="ocr-range" disabled={!canMutate||creating||!!confirmation}>
       <legend>当前所选页面的发送范围</legend>
       <div className="ocr-mode"><label><input type="radio" name={'ocr-mode-'+page.id} checked={mode==='page'} onChange={()=>setMode('page')}/>整页识别</label><label><input type="radio" name={'ocr-mode-'+page.id} checked={mode==='region'} onChange={()=>setMode('region')}/>单个矩形选区</label></div>
@@ -85,7 +90,7 @@ export function OcrPanel({noteId,ownerId,revision,page,canMutate,beforeMutation,
     {mode==='page'?<p className="muted">确认前请核对上方当前阅读页。只发送此页，不发送整本 PDF。</p>:null}
     <div className="note-actions"><button type="button" className="primary" disabled={!canCreate||!!confirmation} onClick={()=>{setError(null);setConfirmation({revision,region:mode==='region'?region:null})}}>{(attempts.data?.length||selected)?'重新识别（新调用）':'识别本页文字'}</button></div>
     {!canMutate?<p className="muted">请先保存笔记信息，并等待页面操作完成。</p>:null}
-    {confirmation?<div className="ocr-confirm" role="group" aria-label="确认发送识别资料"><strong>确认发送当前{confirmation.region?'矩形选区':'整页'}给共享模型？</strong><p>{page.file.filename} · 笔记版本 {confirmation.revision}</p>{confirmation.region?<p>{describeRegion(confirmation.region)}</p>:null}<p>这会创建一次新的模型调用，可能产生费用。失败或中断后不会自动重发。已有识别和纠错稿会保留。</p><div className="note-actions"><button type="button" className="primary" disabled={!canCreate} onClick={()=>void createAttempt()}>{creating?'正在提交…':'确认发送并识别'}</button><button type="button" className="secondary" disabled={creating} onClick={()=>setConfirmation(null)}>取消</button></div></div>:null}
+    {confirmation?<div className="ocr-confirm" role="group" aria-label="确认发送识别资料"><strong>确认发送当前{confirmation.region?'矩形选区':'整页'}给共享模型？</strong><p>{page.file.filename} · 笔记版本 {confirmation.revision} · {modelLabel(choice.provider,choice.model)}</p>{confirmation.region?<p>{describeRegion(confirmation.region)}</p>:null}<p>这会创建一次新的模型调用，可能产生费用。失败或中断后不会自动重发。已有识别和纠错稿会保留。</p><div className="note-actions"><button type="button" className="primary" disabled={!canCreate} onClick={()=>void createAttempt()}>{creating?'正在提交…':'确认发送并识别'}</button><button type="button" className="secondary" disabled={creating} onClick={()=>setConfirmation(null)}>取消</button></div></div>:null}
     <NoteError error={error}/>{notice?<p role="status" className="muted">{notice}</p>:null}
     <div className="panel-heading"><h4>本页识别记录</h4><button type="button" className="text-button" disabled={attempts.isFetching||creating} onClick={()=>{void attempts.refetch();if(selected)void detail.refetch()}}>刷新识别记录</button></div>
     <NoteError error={attempts.error}/>
@@ -122,7 +127,7 @@ function OcrResult({document,page,ownerId,sessionId,canMutate,onSaved}:{document
   }
   return <article className="ocr-result" aria-label="识别详情">
     <h4>{statuses[document.status]||document.status}</h4>
-    <p className="muted">{document.region?'矩形选区':'整页'} · 提交时页码 {document.page_number} · 来源版本 {document.source_revision} · {document.model} · {date(document.created_at)}</p>
+    <p className="muted">{document.region?'矩形选区':'整页'} · 提交时页码 {document.page_number} · 来源版本 {document.source_revision} · {modelLabel(document.provider,document.model)} · {date(document.created_at)}</p>
     {!sameSource?<p className="error" role="alert">来源已失效，不能作为当前页的识别内容或保存纠错。{document.source_error?'原因：'+document.source_error:''}</p>:null}
     {document.error_code?<p className="error" role="status">识别错误：{document.error_code}。不会自动重发；请先核对状态，需要时从上方显式发起新调用。</p>:null}
     {isOcrActive(document.status)?<p role="status">正在自动查询进度，不会发起新的识别。可继续阅读原图。</p>:null}

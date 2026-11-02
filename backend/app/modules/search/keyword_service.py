@@ -93,7 +93,7 @@ def _ocr(owner, keyword, filters):
     pdf = and_(NotePage.pdf_page_number.is_not(None),
                or_(func.jsonb_typeof(source["kind"]).is_(None), source["kind"].astext == "pdf"),
                PdfImport.status == "ready", PdfImport.page_count == PdfImport.completed_pages,
-               PdfImport.page_count.between(1, 200), number == NotePage.pdf_page_number,
+               PdfImport.page_count.between(1, 200), number.between(1, 200), number == NotePage.pdf_page_number,
                or_(and_(source["mode"].astext == "pages", absent),
                    and_(source["mode"].astext == "all", absent, PdfImport.page_count == 1),
                    and_(source["mode"].astext == "region", valid_region)))
@@ -112,7 +112,8 @@ def _ocr(owner, keyword, filters):
               .join(Note, and_(Note.id == OcrDocument.note_id, Note.owner_id == owner))
               .join(AiRun, and_(AiRun.id == OcrDocument.run_id, AiRun.owner_id == owner))
               .join(NotePage, and_(NotePage.id == OcrDocument.page_id, NotePage.owner_id == owner,
-                                  NotePage.note_id == Note.id, NotePage.file_id == OcrDocument.file_id))
+                                  NotePage.note_id == Note.id, NotePage.file_id == OcrDocument.file_id,
+                                  NotePage.deleted_at.is_(None)))
               .join(File, and_(File.id == OcrDocument.file_id, File.owner_id == owner))
               .join(FileVariant, and_(FileVariant.file_id == File.id, FileVariant.kind == "reading"))
               .outerjoin(PdfImport, and_(PdfImport.note_id == Note.id, PdfImport.owner_id == owner))
@@ -123,7 +124,7 @@ def _ocr(owner, keyword, filters):
                      File.height.is_not_distinct_from(OcrDocument.source_height),
                      func.jsonb_typeof(source) == "object", func.jsonb_typeof(source["title"]) == "string",
                      count == 1, revision.between(1, 2147483647), page_revision.between(1, 2147483647),
-                     number.between(1, 200), source["note_id"].astext == cast(Note.id, String),
+                     number.between(1, 2147483647), source["note_id"].astext == cast(Note.id, String),
                      page["page_id"].astext == cast(NotePage.id, String),
                      page["file_id"].astext == cast(File.id, String),
                      page["object_key"].astext == FileVariant.object_key,

@@ -1,3 +1,5 @@
+from app.shared import outbound
+from model_transport import install_model_transport
 """Exercise later PDF/AI/export features with independent tab credentials."""
 
 import io
@@ -25,7 +27,8 @@ def tabs(client, tmp_path, monkeypatch):
     def no_live():
         raise AssertionError("Tab integration tests must never call a real provider")
 
-    monkeypatch.setattr(chat_provider, "create_client", no_live)
+    monkeypatch.setattr(outbound.httpx, "HTTPTransport", no_live)
+    monkeypatch.setattr(outbound, "resolve_public", lambda *a, **kw: ("8.8.8.8",))
     create_members(client)
     sessions = {
         name: tab_login(client, name, "member-password" if name != "admin" else "admin-test-password")

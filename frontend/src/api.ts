@@ -9,7 +9,7 @@ export type Audit = components['schemas']['AuditOut']
 export type LoginInput = components['schemas']['LoginIn']
 export type RegisterInput = components['schemas']['RegisterIn']
 export type ResetInput = components['schemas']['ResetIn']
-export type AiCatalog = components['schemas']['AiCatalogOut']
+export type {Catalog as AiCatalog} from './features/ai/model-catalog'
 export type AiConnection = components['schemas']['AiConnectionOut']
 export class ApiError extends Error {
   status:number;code:string;requestId:string
@@ -26,14 +26,15 @@ export async function authContext(){
   return {session,ticket,headers:sessionHeaders(session),check}
 }
 export function rejectExpiredSession(response:Pick<Response,'status'>,session:TabSession|null){if(response.status===401&&session)clearSession(session.session_token)}
-async function sendAuthorized(path:string,init:RequestInit,context:Awaited<ReturnType<typeof authContext>>){
+async function sendAuthorized(path:string,init:RequestInit,context:Awaited<ReturnType<typeof authContext>>,closingPushCleanup=false){
   const controller=new AbortController(),external=init.signal
   const unsubscribe=authSession.subscribe(()=>{if(!authSession.current(context.ticket))controller.abort()})
   const signal=external?AbortSignal.any([external,controller.signal]):controller.signal
   const timeout=path==='/auth/logout'?setTimeout(()=>controller.abort(),12000):undefined
   try{
     context.check()
-    if(context.ticket.phase==='closing'&&path!=='/auth/logout')throw new SessionChangedError()
+    const cancelPush=closingPushCleanup&&(path==='/push/subscriptions'&&init.method==='GET'||/^\/push\/subscriptions\/[0-9a-f-]+$/.test(path)&&init.method==='DELETE')
+    if(context.ticket.phase==='closing'&&path!=='/auth/logout'&&!cancelPush)throw new SessionChangedError()
     const headers=new Headers(init.headers)
     for(const [name,value] of Object.entries(context.headers))headers.set(name,value)
     const response=await fetch('/api/v1'+path,{...init,headers,signal,credentials:'omit',redirect:'error'})
@@ -44,6 +45,15 @@ async function sendAuthorized(path:string,init:RequestInit,context:Awaited<Retur
   finally{unsubscribe();clearTimeout(timeout)}
 }
 export async function apiResponse(path:string,init:RequestInit={}):Promise<Response>{return sendAuthorized(path,init,await authContext())}
+/** Only subscription status/delete may run while logout has locked the UI. */
+export async function pushLogoutApi<T>(path:string,method='GET',signal?:AbortSignal):Promise<T>{
+  const context=await authContext()
+  const response=await sendAuthorized(path,{method,signal},context,true)
+  if(response.status===204)return undefined as T
+  const data=await response.json();context.check()
+  if(!response.ok)throw new ApiError(response.status,data.code,data.message,data.request_id)
+  return data as T
+}
 export async function logoutTab():Promise<string>{
   const context=await authContext()
   const response=await sendAuthorized('/auth/logout',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'},context)

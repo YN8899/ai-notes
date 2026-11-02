@@ -2,9 +2,9 @@ import type { components } from '../../api.generated'
 import { authSession, SessionChangedError } from '../../session.ts'
 import { apiResponse } from '../../api.ts'
 
-export type Run = components['schemas']['RunOut']
+export type Run = Omit<components['schemas']['RunOut'],'provider'|'tools'|'tool_scope'>&{provider?:string;tools?:string[];tool_scope?:import('./tool-contract').FrozenScope|null}
 export type Conversation = components['schemas']['ConversationOut']
-export type Detail = components['schemas']['ConversationDetail']
+export type Detail = Omit<components['schemas']['ConversationDetail'],'runs'>&{runs:Run[]}
 export const active = (run?:Run) => run?.status === 'queued' || run?.status === 'running'
 
 // Fetch only reads an existing run: reconnecting cannot submit another paid request.

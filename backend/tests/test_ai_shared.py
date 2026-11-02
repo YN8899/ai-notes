@@ -1,3 +1,5 @@
+from app.shared import outbound
+from model_transport import install_model_transport
 import httpx
 import pytest
 from pydantic import ValidationError
@@ -22,15 +24,14 @@ def isolated_shared_configuration(monkeypatch):
     def forbid_live_requests():
         raise AssertionError("Install a mock transport; live provider access is forbidden in tests")
 
-    monkeypatch.setattr(providers, "create_client", forbid_live_requests)
+    monkeypatch.setattr(outbound.httpx, "HTTPTransport", forbid_live_requests)
+    monkeypatch.setattr(outbound, "resolve_public", lambda *a, **kw: ("8.8.8.8",))
     yield
     settings.cache_clear()
 
 
 def mock_provider(monkeypatch, handler):
-    monkeypatch.setattr(providers, "create_client", lambda: httpx.Client(
-        transport=httpx.MockTransport(handler), follow_redirects=False, trust_env=False,
-    ))
+    install_model_transport(monkeypatch, handler, kind="discovery")
 
 
 def test_catalog_requires_login_and_returns_only_shared_status_and_capabilities(client):
@@ -102,7 +103,7 @@ def test_connection_uses_server_key_fixed_host_and_controlled_models_without_lea
 
     def handler(request):
         requests.append(request)
-        assert str(request.url) == providers.MODELS_URL and request.method == "GET"
+        assert request.url.host == "8.8.8.8" and request.headers["host"] == "api.deepseek.com" and request.url.path == "/models" and request.method == "GET"
         assert request.headers["Authorization"] == "Bearer " + TEST_KEY
         return httpx.Response(200, json={"data": [{"id": "deepseek-flash"}, {"id": "deepseek-v4-pro"}, {"id": "unapproved-model"}]})
 

@@ -26,21 +26,26 @@ def notebook(db, owner, note_id):
     return note, item
 
 
-def pages(db, owner, note_id):
-    return list(db.execute(select(NotePage, File, FileVariant).join(File, NotePage.file_id == File.id)
+def pages(db, owner, note_id, *, historical=False):
+    query = select(NotePage, File, FileVariant).join(File, NotePage.file_id == File.id)
+    query = (query
                           .join(FileVariant, FileVariant.file_id == File.id).where(
                               NotePage.owner_id == owner, NotePage.note_id == note_id,
                               NotePage.pdf_page_number.is_not(None), File.owner_id == owner,
                               File.status == "ready", FileVariant.kind == "reading")
-                          .order_by(NotePage.pdf_page_number)))
+                          .order_by(NotePage.pdf_page_number))
+    if not historical:
+        query = query.where(NotePage.deleted_at.is_(None))
+    return list(db.execute(query))
 
 
 def detail(db, owner, note_id):
     note, item = notebook(db, owner, note_id)
     ready = pages(db, owner, note_id)
-    if [p.pdf_page_number for p, _, _ in ready] != list(range(1, item.page_count + 1)):
+    physical = pages(db, owner, note_id, historical=True)
+    if [p.pdf_page_number for p, _, _ in physical] != list(range(1, item.page_count + 1)):
         raise AppError(409, "pdf_pages_unavailable", "原 PDF 页面不完整，不能声明已读取整本；请重新导入原件")
-    return s.PdfNotebookDetail(id=note.id, title=note.title, revision=note.revision, page_count=item.page_count,
+    return s.PdfNotebookDetail(id=note.id, title=note.title, revision=note.revision, page_count=len(ready),
                               pages=[s.PdfNotebookPage(page_id=p.id, number=p.pdf_page_number, file_id=f.id, bytes=v.bytes) for p, f, v in ready])
 
 
@@ -71,7 +76,10 @@ def _freeze(db, owner, data):
     book = detail(db, owner, data.note_id)
     if book.revision != data.revision:
         raise AppError(409, "pdf_changed", "PDF 笔记已更新，请刷新资料范围后再发送")
-    selected = set(data.page_numbers) if data.mode in {"pages", "region"} else set(range(1, book.page_count + 1))
+    _, item = notebook(db, owner, data.note_id)
+    if data.mode == "all" and len(book.pages) != item.page_count:
+        raise AppError(409, "pdf_pages_retired", "部分原 PDF 页面已移除，请按当前可见的原页号选择资料")
+    selected = set(data.page_numbers) if data.mode in {"pages", "region"} else {p.number for p in book.pages}
     if not selected or not selected.issubset({p.number for p in book.pages}):
         raise AppError(422, "pdf_page_invalid", "选择的页码超出原 PDF 范围")
     frozen = [{"page_id": str(p.id), "number": p.pdf_page_number, "file_id": str(f.id),
@@ -94,13 +102,14 @@ def freeze(db, owner, data):
     return _freeze(db, owner, data)[0]
 
 
-def validate(db, owner, source):
+def validate(db, owner, source, *, historical=False):
     try:
         public = s.PdfSourceOut.model_validate(source)
         note, item = notebook(db, owner, public.note_id)
         if public.mode == "all" and {p.number for p in public.pages} != set(range(1, item.page_count + 1)):
             raise ValueError("invalid_full_pdf_source")
-        actual = {str(p.id): (str(f.id), p.pdf_page_number, v.object_key, v.bytes) for p, f, v in pages(db, owner, note.id)}
+        actual = {str(p.id): (str(f.id), p.pdf_page_number, v.object_key, v.bytes)
+                  for p, f, v in pages(db, owner, note.id, historical=historical)}
         for p in source["pages"]:
             if type(p["bytes"]) is not int or p["bytes"] <= 0 or actual.get(p["page_id"]) != (
                     p["file_id"], p["number"], p["object_key"], p["bytes"]):

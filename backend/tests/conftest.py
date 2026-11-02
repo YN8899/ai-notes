@@ -12,11 +12,16 @@ os.environ["RATE_LIMIT_REQUESTS"] = "1000"
 os.environ["STORAGE_BACKEND"] = "local"
 # Never let a developer's private shared model key reach regression tests.
 os.environ["DEEPSEEK_API_KEY"] = ""
+os.environ["AI_PROVIDER_PROFILES"] = "[]"
 os.environ["EMBEDDING_ENABLED"] = "false"
 os.environ["EMBEDDING_API_KEY"] = ""
 os.environ["EMBEDDING_WORKSPACE"] = ""
 os.environ["EMBEDDING_MODEL"] = "text-embedding-v4"
 os.environ["EMBEDDING_DIMENSIONS"] = "1024"
+os.environ["PUSH_ENABLED"] = "false"
+os.environ["PUSH_VAPID_PUBLIC_KEY"] = ""
+os.environ["PUSH_VAPID_PRIVATE_KEY"] = ""
+os.environ["PUSH_VAPID_SUBJECT"] = ""
 from app.shared.db import engine, SessionLocal, Base
 from app.shared.models import User
 from app.shared.security import hasher

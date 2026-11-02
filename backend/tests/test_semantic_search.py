@@ -1,3 +1,5 @@
+from app.shared import outbound
+from model_transport import install_model_transport as _install_model_transport
 """Real disposable PostgreSQL/pgvector; every model response is an in-process fake."""
 from copy import deepcopy
 from datetime import timedelta
@@ -21,7 +23,7 @@ from conftest import login, mutate
 from test_keyword_search import create, recognize, correct
 from test_image_chat import image_book
 
-REAL_CREATE_CLIENT = embedding_provider.create_client
+
 
 
 @pytest.fixture(autouse=True)
@@ -31,9 +33,14 @@ def private_embedding(monkeypatch, tmp_path):
     settings.cache_clear()
     def forbidden():
         raise AssertionError("No real embedding calls are permitted in tests")
-    monkeypatch.setattr(embedding_provider, "create_client", forbidden)
+    monkeypatch.setattr(outbound.httpx, "HTTPTransport", forbidden)
+    monkeypatch.setattr(outbound, "resolve_public", lambda *a, **kw: ("8.8.8.8",))
     yield
     settings.cache_clear()
+
+
+def install_model_transport(monkeypatch, handler):
+    return _install_model_transport(monkeypatch, handler, kind="embedding")
 
 
 def enable(monkeypatch, dimensions=64):
@@ -56,7 +63,7 @@ def mock(monkeypatch, callback=None, invalid=None):
         if invalid:
             invalid(result)
         return httpx.Response(200, json=result)
-    monkeypatch.setattr(embedding_provider, "create_client", lambda: httpx.Client(transport=httpx.MockTransport(send), trust_env=False))
+    install_model_transport(monkeypatch, send)
     return calls
 
 
@@ -261,7 +268,7 @@ def test_singleattempt_unknown_receipts_and_interrupted_queries(client, monkeypa
     key = str(uuid4())
     def timeout(request):
         raise httpx.ReadTimeout("secret-and-source-must-not-leak")
-    monkeypatch.setattr(embedding_provider, "create_client", lambda: httpx.Client(transport=httpx.MockTransport(timeout)))
+    install_model_transport(monkeypatch, timeout)
     failed = query(client, request_key=key).json()
     assert failed["status"] == "failed" and "secret-and-source" not in json.dumps(failed)
     mock(monkeypatch)
@@ -507,8 +514,7 @@ def test_build_manifest_work_expiring_lease_prevents_paid_post(client, monkeypat
 @pytest.mark.parametrize("payload", [b'null', b'[]', b'{broken', b'{"data":[{"index":0,"embedding":[NaN]}]}'])
 def test_nonobject_invalid_json_provider_response_is_sanitized(monkeypatch, payload):
     enable(monkeypatch)
-    monkeypatch.setattr(embedding_provider, "create_client", lambda: httpx.Client(transport=httpx.MockTransport(
-        lambda request: httpx.Response(200, content=payload))))
+    install_model_transport(monkeypatch, lambda request: httpx.Response(200, content=payload))
     with pytest.raises(AppError) as error:
         embedding_provider.embed(["合成资料"], service.configuration())
     assert error.value.code == "embedding_response_invalid"
@@ -516,8 +522,7 @@ def test_nonobject_invalid_json_provider_response_is_sanitized(monkeypatch, payl
 
 def test_bounded_response_and_tiny_vector_normalization(monkeypatch):
     enable(monkeypatch)
-    monkeypatch.setattr(embedding_provider, "create_client", lambda: httpx.Client(transport=httpx.MockTransport(
-        lambda request: httpx.Response(200, content=b" " * (embedding_provider.MAX_RESPONSE_BYTES + 1)))))
+    install_model_transport(monkeypatch, lambda request: httpx.Response(200, content=b" " * (embedding_provider.MAX_RESPONSE_BYTES + 1)))
     with pytest.raises(AppError):
         embedding_provider.embed(["合成"], service.configuration())
     mock(monkeypatch, invalid=lambda r: r["data"][0].update(embedding=[1e-300] + [0.0] * 63))
@@ -531,8 +536,7 @@ def test_duplicate_indices_and_nonfinite_vectors_rejected(monkeypatch):
     with pytest.raises(AppError):
         embedding_provider.embed(["一", "二"], service.configuration())
     body = '{"data":[{"index":0,"embedding":[NaN,' + ','.join('0' for _ in range(63)) + ']}]}'
-    monkeypatch.setattr(embedding_provider, "create_client", lambda: httpx.Client(transport=httpx.MockTransport(
-        lambda request: httpx.Response(200, content=body))))
+    install_model_transport(monkeypatch, lambda request: httpx.Response(200, content=body))
     with pytest.raises(AppError):
         embedding_provider.embed(["合成"], service.configuration())
 
@@ -553,12 +557,14 @@ def test_multibatch_snapshots_and_no_automatic_replay(client, monkeypatch):
 
 
 def test_client_disables_redirects_proxies_and_retries(monkeypatch):
-    # This constructs a client only; it never sends any request.
-    original = httpx.Client
+    enable(monkeypatch)
     captured = {}
-    def capture(**kwargs):
+    def factory(**kwargs):
         captured.update(kwargs)
-        return original(**kwargs)
-    monkeypatch.setattr(httpx, "Client", capture)
-    REAL_CREATE_CLIENT().close()
-    assert captured["trust_env"] is False and captured["follow_redirects"] is False
+        payload = {"data": [{"index": 0, "embedding": [1.0] + [0.0] * 63}], "usage": {}}
+        return httpx.MockTransport(lambda request: httpx.Response(200, headers={"content-type": "application/json"},
+            stream=httpx.ByteStream(json.dumps(payload).encode())))
+    monkeypatch.setattr(outbound, "resolve_public", lambda *a, **kw: ("8.8.8.8",))
+    monkeypatch.setattr(outbound.httpx, "HTTPTransport", factory)
+    embedding_provider.embed(["合成"], service.configuration())
+    assert captured == {"verify": True, "trust_env": False, "retries": 0}

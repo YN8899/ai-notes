@@ -1,3 +1,5 @@
+from app.shared import outbound
+from model_transport import install_model_transport
 """T17: owner-scoped literal search and independently revalidated source access."""
 from copy import deepcopy
 from datetime import timedelta
@@ -30,7 +32,8 @@ def private_config(monkeypatch, tmp_path):
     def no_live():
         raise AssertionError("Keyword search tests must never call a live provider")
 
-    monkeypatch.setattr(chat_provider, "create_client", no_live)
+    monkeypatch.setattr(outbound.httpx, "HTTPTransport", no_live)
+    monkeypatch.setattr(outbound, "resolve_public", lambda *a, **kw: ("8.8.8.8",))
     yield
     settings.cache_clear()
 
@@ -323,6 +326,73 @@ def test_pdf_ocr_region_source_and_original_page_number(client, monkeypatch):
     assert not search(client, "PDF关键词")["items"]
 
 
+def test_retired_image_active_count_limit_preserves_ocr_citation_201_in_keyword_and_semantic_sources(client, monkeypatch):
+    from app.modules.search import semantic_sources
+    from test_offline_sync import operation, sync
+    login(client)
+    note_id = image_book(client, count=201)
+    physical = client.get(f"/api/v1/notes/{note_id}/pages").json()
+    sync(client, operation("page.remove", physical[0]["id"], {"note_id": note_id}, 2))
+    detail = client.get(f"/api/v1/ai/image-notebooks/{note_id}")
+    assert detail.status_code == 200 and detail.json()["page_count"] == 200
+    assert detail.json()["pages"][-1]["number"] == 201
+    control = recognize(client, monkeypatch, note_id, "可检索对照200", page=198)
+    candidate = recognize(client, monkeypatch, note_id, "可检索图片201", page=199)
+    assert (control["page_number"], candidate["page_number"]) == (200, 201)
+    assert control["source_valid"] and candidate["source_valid"]
+    assert control["id"] in ids(search(client, "可检索对照200"))
+    found = search(client, "可检索图片201")
+    assert candidate["id"] in ids(found)
+    hit = next(hit for hit in found["items"] if hit["id"] == candidate["id"])
+    assert hit["page_number"] == 201
+    assert resolve(client, hit, "可检索图片201").status_code == 200
+    with SessionLocal() as db:
+        owner = db.scalar(select(User).where(User.username == "admin"))
+        source_keys = semantic_sources.sources(db, owner.id)
+    assert f"ocr:{control['id']}" in source_keys
+    assert f"ocr:{candidate['id']}" in source_keys
+
+
+def test_pdf_citation_201_remains_excluded_from_keyword_and_semantic_sources(client, monkeypatch):
+    from app.modules.files.models import PdfImport
+    from app.modules.search import semantic_sources
+    login(client)
+    note_id = pdf_book(client)
+    row = recognize(client, monkeypatch, note_id, "非法原PDF页201", pdf=True)
+    assert row["id"] in ids(search(client, "非法原PDF页201"))
+    with SessionLocal.begin() as db:
+        run = db.get(AiRun, UUID(row["run_id"]))
+        run.source = {**run.source, "pages": [{**run.source["pages"][0], "number": 201}]}
+        db.get(NotePage, UUID(row["page_id"])).pdf_page_number = 201
+        item = db.scalar(select(PdfImport).where(PdfImport.note_id == UUID(note_id)))
+        item.page_count = item.completed_pages = 201
+    assert search(client, "非法原PDF页201")["items"] == []
+    with SessionLocal() as db:
+        owner = db.scalar(select(User).where(User.username == "admin"))
+        assert f"ocr:{row['id']}" not in semantic_sources.sources(db, owner.id)
+
+
+@pytest.mark.parametrize("number", [0, -1, True, "201", 201.5, 2147483648, 10**30])
+def test_malformed_or_overflow_image_citation_still_fails_closed(client, monkeypatch, number):
+    from app.modules.search import semantic_sources
+    from sqlalchemy.orm.attributes import flag_modified
+    login(client)
+    row = recognize(client, monkeypatch, image_book(client, 1), "无效图片页标签")
+    with SessionLocal.begin() as db:
+        run = db.get(AiRun, UUID(row["run_id"]))
+        run.source = {**run.source, "pages": [{**run.source["pages"][0], "number": number}]}
+        # JSONB equality tracking otherwise treats Python True == 1 as no
+        # change, leaving the original valid label in the malformed fixture.
+        flag_modified(run, "source")
+    with SessionLocal() as db:
+        persisted = db.get(AiRun, UUID(row["run_id"])).source["pages"][0]["number"]
+        assert type(persisted) is type(number) and persisted == number
+    assert search(client, "无效图片页标签")["items"] == []
+    with SessionLocal() as db:
+        owner = db.scalar(select(User).where(User.username == "admin"))
+        assert f"ocr:{row['id']}" not in semantic_sources.sources(db, owner.id)
+
+
 def test_filters_combine_and_folder_means_direct_notebooks(client, monkeypatch):
     login(client)
     folder = create(client, "folders", name="课程")
@@ -473,7 +543,8 @@ def test_search_and_source_need_no_model_config_and_create_no_work(client, monke
     create(client, title="文本关键词")
     recognize(client, monkeypatch, image_book(client, 1), "OCR关键词", region=REGION)
     monkeypatch.setattr(settings(), "deepseek_api_key", type(settings().deepseek_api_key)(""))
-    monkeypatch.setattr(chat_provider, "create_client", lambda: pytest.fail("Search must not create a provider"))
+    monkeypatch.setattr(outbound.httpx, "HTTPTransport", lambda: pytest.fail("Search must not create a provider"))
+    monkeypatch.setattr(outbound, "resolve_public", lambda *a, **kw: ("8.8.8.8",))
     before = work_counts()
     page = search(client, "关键词")
     assert len(page["items"]) == 2

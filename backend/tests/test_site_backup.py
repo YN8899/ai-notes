@@ -189,7 +189,9 @@ def site_account(export_account):
                        payload={"private": "应保留的历史事件"}, delivered_at=utcnow())
         db.add(event)
         db.flush()
-        db.add(Notification(user_id=third.id, event_id=event.id, message="已完成的历史通知"))
+        from app.modules.notifications.feed_models import NotificationCounter
+        db.add(NotificationCounter(owner_id=third.id, head_seq=1, read_revision=0))
+        db.add(Notification(user_id=third.id, event_id=event.id, seq=1, message="已完成的历史通知"))
         conversation = AiConversation(owner_id=third.id, request_key=uuid.uuid4(), title="中断恢复演练")
         db.add(conversation)
         db.flush()

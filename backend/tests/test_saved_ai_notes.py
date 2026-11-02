@@ -1,3 +1,5 @@
+from app.shared import outbound
+from model_transport import install_model_transport
 """Save persisted AI answers without invoking a provider or trusting model markup."""
 
 from concurrent.futures import ThreadPoolExecutor
@@ -33,7 +35,8 @@ def private_config(monkeypatch, tmp_path):
     def no_live(*_args, **_kwargs):
         raise AssertionError("Saving an answer must never call the real model")
 
-    monkeypatch.setattr(chat_provider, "create_client", no_live)
+    monkeypatch.setattr(outbound.httpx, "HTTPTransport", no_live)
+    monkeypatch.setattr(outbound, "resolve_public", lambda *a, **kw: ("8.8.8.8",))
     monkeypatch.setattr(chat_provider, "stream_chat", no_live)
     yield
     settings.cache_clear()
@@ -101,7 +104,7 @@ def test_first_save_is_normal_editable_note_with_initial_version_and_provenance(
     assert len(versions) == 1 and versions[0]["revision"] == 1
     assert versions[0]["snapshot"]["body_json"] == detail["body_json"]
     provenance = client.get(f"/api/v1/notes/{saved['note_id']}/ai-answer").json()
-    assert provenance == {**saved, "model": "deepseek-flash"}
+    assert provenance == {**saved, "model": "deepseek-flash", "provider": "deepseek"}
     assert client.get(f"/api/v1/ai/conversations/{cid}/saved-notes").json() == [saved]
     edited = mutate(client, "PATCH", f"/notes/{saved['note_id']}", {
         "revision": 1, "title": "手工整理后的笔记", "plain_text": "自己的补充",

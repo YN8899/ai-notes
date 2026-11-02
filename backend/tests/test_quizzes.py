@@ -1,3 +1,5 @@
+from app.shared import outbound
+from model_transport import install_model_transport
 """T21 real PostgreSQL with synthetic text/images and mock HTTP providers only."""
 import json
 from datetime import timedelta
@@ -35,7 +37,8 @@ def config(monkeypatch, tmp_path):
     monkeypatch.setenv("DEEPSEEK_API_KEY", "fake-quizzes-key")
     settings.cache_clear()
     monkeypatch.setattr(settings(), "storage_root", str(tmp_path / "private"))
-    monkeypatch.setattr(chat_provider, "create_client", lambda: (_ for _ in ()).throw(AssertionError("No live provider")))
+    monkeypatch.setattr(outbound.httpx, "HTTPTransport", lambda: (_ for _ in ()).throw(AssertionError("No live provider")))
+    monkeypatch.setattr(outbound, "resolve_public", lambda *a, **kw: ("8.8.8.8",))
     yield
     settings.cache_clear()
 

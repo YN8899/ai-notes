@@ -9,6 +9,9 @@ from app.modules.ai.text_schemas import TextInput, TextSourceOut, TextSourceRead
 from app.modules.notes.schemas import Input, Title
 
 
+from app.modules.ai.tools import ToolSelection
+
+
 class AiModelOut(BaseModel):
     id: str
     name: str
@@ -16,9 +19,11 @@ class AiModelOut(BaseModel):
     supports_vision: bool
     supports_streaming: bool
     supports_embedding: bool
+    supports_tools: bool = False
 
 
 class AiProviderOut(BaseModel):
+    enabled: bool = True
     id: str
     name: str
     models: list[AiModelOut]
@@ -150,11 +155,13 @@ class SourcePageOut(BaseModel):
     region: ImageRegion | None = None
 
 
-class RunCreate(BaseModel):
+class RunCreate(ToolSelection):
     model_config = ConfigDict(extra="forbid")
+    tool_preview_hash: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
     request_key: UUID
     previous_run_id: UUID | None = None
-    model: Literal["deepseek-flash", "deepseek-v4-pro"] = "deepseek-flash"
+    provider: str = Field(default="deepseek", pattern=r"^[a-z][a-z0-9_-]{0,31}$")
+    model: str = Field(default="deepseek-flash", min_length=1, max_length=256)
     prompt: str = Field(min_length=1, max_length=8000)
     pdf: PdfInput | None = None
     image: ImageInput | None = None
@@ -186,6 +193,9 @@ class RunOut(BaseModel):
     conversation_id: UUID
     request_key: UUID
     model: str
+    provider: str = "deepseek"
+    tools: list[str] = Field(default_factory=list)
+    tool_scope: dict | None = None
     prompt: str
     answer: str
     status: Literal["queued", "running", "succeeded", "cancelled", "interrupted", "failed", "truncated"]
@@ -228,4 +238,47 @@ class SavedAnswerOut(BaseModel):
 
 
 class SavedAnswerProvenanceOut(SavedAnswerOut):
+    provider: str = "deepseek"
     model: str
+
+
+class ToolScopePreviewOut(BaseModel):
+    preview_hash: str = Field(pattern=r"^[a-f0-9]{64}$")
+    tools: list[str]
+    scope: dict | None
+    note_count: int
+
+
+class ToolCallOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: UUID
+    position: int
+    provider_call_id: str
+    tool_name: str
+    arguments: dict
+    result: str | None
+    sources: list[dict]
+    status: Literal["pending", "succeeded", "failed", "interrupted"]
+    error_code: str | None
+    created_at: datetime
+    finished_at: datetime | None
+
+
+class ToolAttemptOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: UUID
+    position: int
+    kind: str
+    status: str
+    usage: dict[str, int] | None
+    error_code: str | None
+    created_at: datetime
+
+
+class ToolHistoryOut(BaseModel):
+    provider: str
+    model: str
+    tools: list[str]
+    scope: dict | None
+    calls: list[ToolCallOut]
+    attempts: list[ToolAttemptOut]

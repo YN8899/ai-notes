@@ -215,7 +215,8 @@ class GenerationPreview(QuizCreate):
     kinds: list[Kind] = Field(min_length=1, max_length=5)
     count: int = Field(strict=True, ge=1, le=20)
     source: Selection
-    model: Literal["deepseek-flash", "deepseek-v4-pro"] = "deepseek-flash"
+    provider: str = Field(default="deepseek", pattern=r"^[a-z][a-z0-9_-]{0,31}$")
+    model: str = Field(default="deepseek-flash", min_length=1, max_length=256)
 
     @model_validator(mode="after")
     def requested_kinds(self):
@@ -248,6 +249,7 @@ class GenerationPreviewOut(BaseModel):
     kinds: list[Kind]
     count: int
     model: str
+    provider: str = "deepseek"
     planned_calls: Literal[1] = 1
 
 
@@ -258,6 +260,7 @@ class GenerationOut(BaseModel):
     kinds: list[Kind]
     count: int
     model: str
+    provider: str = "deepseek"
     status: Literal["pending", "succeeded", "failed"]
     run_status: str
     usage: dict | None
@@ -278,7 +281,8 @@ class GradingPreview(Input):
     attempt_id: UUID
     question_id: UUID
     revision: int = Field(strict=True, ge=1)
-    model: Literal["deepseek-flash", "deepseek-v4-pro"] = "deepseek-flash"
+    provider: str = Field(default="deepseek", pattern=r"^[a-z][a-z0-9_-]{0,31}$")
+    model: str = Field(default="deepseek-flash", min_length=1, max_length=256)
 
 
 class GradingCreate(GradingPreview, ConfirmExternal):
@@ -292,6 +296,7 @@ class GradingPreviewOut(BaseModel):
     revision: int
     answer_revision: int
     model: str
+    provider: str = "deepseek"
     input: dict
     planned_calls: Literal[1] = 1
 
@@ -315,6 +320,7 @@ class GradingOut(BaseModel):
     answer_revision: int
     attempt_revision: int
     model: str
+    provider: str = "deepseek"
     status: Literal["pending", "succeeded", "failed"]
     run_status: str
     usage: dict | None

@@ -162,6 +162,9 @@ def _collect(connection):
         key_owners.setdefault(row["object_key"], set()).add(files[_uuid(row["file_id"])]["owner_id"])
     _require(all(len(owners) == 1 for owners in key_owners.values()))
 
+    # Physical page identities remain retention roots after retirement. Do not
+    # filter current visibility here or require the new marker when verifying a
+    # recognized pre-retirement whole-site backup before its migration.
     pages = {_uuid(row["id"]): row for row in rows(
         "note_pages", "id,owner_id,note_id,file_id,position,revision,pdf_page_number")}
     historical_pages = {}
@@ -280,7 +283,7 @@ def _collect(connection):
             allowed = {"page_id", "number", "region"} | ({"file_id", "object_key", "bytes", "page_revision"} if internal else set())
             _require(set(page) <= allowed)
             page_id, number = _uuid(page["page_id"]), _positive(page["number"])
-            _require(number <= 200 and page_id not in seen_ids and number not in seen_numbers)
+            _require((kind != "pdf" or number <= 200) and page_id not in seen_ids and number not in seen_numbers)
             seen_ids.add(page_id)
             seen_numbers.add(number)
             region = page.get("region")
@@ -327,12 +330,54 @@ def _collect(connection):
             allowed = {page["number"] for page in row["source"]["pages"]}
             _require(all(type(number) is int and number in allowed for number in row["cited_page_numbers"]))
 
+    # M3 objects remain roots after withdrawal/unfriend and in recovered offline
+    # history. Access revocation never implies consent to delete retained data.
+    chat_threads = {_uuid(row["id"]): row for row in rows("chat_threads", "id,user_low_id,user_high_id,last_seq")}
+    chat_messages = {_uuid(row["id"]): row for row in rows("chat_messages", "id,thread_id,sender_id,seq")}
+    for row in chat_messages.values():
+        parent = chat_threads[_uuid(row["thread_id"])]
+        _require(_uuid(row["sender_id"]) in {_uuid(parent["user_low_id"]), _uuid(parent["user_high_id"])})
+        _positive(row["seq"])
+    for row in rows("chat_attachments", "id,owner_id,thread_id,message_id,object_key,bytes,sha256"):
+        owner = _uuid(row["owner_id"])
+        parent = chat_threads[_uuid(row["thread_id"])]
+        _require(owner in {_uuid(parent["user_low_id"]), _uuid(parent["user_high_id"])})
+        _positive(row["bytes"])
+        _require(isinstance(row["sha256"], str) and re.fullmatch(r"[0-9a-f]{64}", row["sha256"]))
+        if row["message_id"] is not None:
+            message = chat_messages[_uuid(row["message_id"])]
+            _require(_uuid(message["thread_id"]) == _uuid(row["thread_id"]) and _uuid(message["sender_id"]) == owner)
+        keep(row["object_key"])
+        key_owners.setdefault(row["object_key"], set()).add(owner)
+    community_posts = {_uuid(row["id"]): _uuid(row["owner_id"]) for row in rows("community_posts", "id,owner_id")}
+    community_snapshots = {_uuid(row["id"]): row for row in rows("community_snapshots", "id,owner_id,post_id,status,job_id")}
+    for row in community_snapshots.values():
+        _require(community_posts[_uuid(row["post_id"])] == _uuid(row["owner_id"]) and row["status"] in {"preparing", "ready", "failed", "cancelled"})
+    for row in rows("community_assets", "id,owner_id,snapshot_id,object_key,original_object_key,source_object_key,source_original_object_key,bytes,original_bytes,status"):
+        owner = _uuid(row["owner_id"])
+        _require(_uuid(community_snapshots[_uuid(row["snapshot_id"])]["owner_id"]) == owner and row["status"] in {"pending", "ready"})
+        _positive(row["bytes"])
+        _positive(row["original_bytes"])
+        for field in ("object_key", "original_object_key", "source_object_key", "source_original_object_key"):
+            if row[field] is not None:
+                keep(row[field])
+                key_owners.setdefault(row[field], set()).add(owner)
+    archive_records = {_uuid(row["id"]): _uuid(row["owner_id"]) for row in rows("social_archive_records", "id,owner_id")}
+    for row in rows("social_archive_assets", "id,owner_id,record_id,object_key,bytes,sha256"):
+        owner = _uuid(row["owner_id"])
+        _require(archive_records[_uuid(row["record_id"])] == owner)
+        _positive(row["bytes"])
+        _require(isinstance(row["sha256"], str) and re.fullmatch(r"[0-9a-f]{64}", row["sha256"]))
+        keep(row["object_key"])
+        key_owners.setdefault(row["object_key"], set()).add(owner)
+    _require(all(len(owners) == 1 for owners in key_owners.values()))
+
     active_jobs = 0
     for row in rows("jobs", "id,owner_id,kind,status,lease_until,worker_token IS NOT NULL AS has_worker_token,"
-                    "CASE WHEN kind IN ('image.process','pdf.import') THEN payload ELSE NULL END AS payload,"
+                    "CASE WHEN kind IN ('image.process','pdf.import','semantic.build','learning.reminder','community.publish','notification.push','notification.test') THEN payload ELSE NULL END AS payload,"
                     "result->'file_id' AS result_file_id,result->'import_id' AS result_import_id"):
         owner = _uuid(row["owner_id"])
-        _require(row["kind"] in {"image.process", "pdf.import", "diagnostic"}
+        _require(row["kind"] in {"image.process", "pdf.import", "diagnostic", "semantic.build", "learning.reminder", "community.publish", "notification.push", "notification.test"}
                  and row["status"] in {"queued", "running", "succeeded", "failed"})
         active_jobs += row["status"] in {"queued", "running"} or row["lease_until"] is not None or row["has_worker_token"]
         if row["kind"] == "image.process":
@@ -347,6 +392,21 @@ def _collect(connection):
             _require(_uuid(imports[target]["owner_id"]) == owner)
             _require(row["result_import_id"] is None or _uuid(row["result_import_id"]) == target)
             _require(row["result_file_id"] is None)
+        elif row["kind"] == "community.publish":
+            _require(isinstance(row["payload"], dict) and set(row["payload"]) == {"post_id", "snapshot_id"})
+            target = community_snapshots[_uuid(row["payload"]["snapshot_id"])]
+            _require(_uuid(target["owner_id"]) == owner and _uuid(target["post_id"]) == _uuid(row["payload"]["post_id"]) and _uuid(target["job_id"]) == _uuid(row["id"]))
+            _require(row["result_file_id"] is None and row["result_import_id"] is None)
+        elif row["kind"] in {"semantic.build", "learning.reminder"}:
+            _require(row["payload"] == {} and row["result_file_id"] is None and row["result_import_id"] is None)
+        elif row["kind"] in {"notification.push", "notification.test"}:
+            second_id = "notification_id" if row["kind"] == "notification.push" else "session_id"
+            _require(isinstance(row["payload"], dict) and set(row["payload"]) == {"subscription_id", second_id})
+            _uuid(row["payload"]["subscription_id"])
+            _uuid(row["payload"][second_id])
+            # Deleted/cancelled subscriptions may outlive their queued jobs.
+            # These two IDs never reference file/object capabilities.
+            _require(row["result_file_id"] is None and row["result_import_id"] is None)
         else:
             _require(row["result_file_id"] is None and row["result_import_id"] is None)
 

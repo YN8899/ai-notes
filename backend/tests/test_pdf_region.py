@@ -1,3 +1,5 @@
+from app.shared import outbound
+from model_transport import install_model_transport
 """PDF single-region contracts, actual provider bytes and private provenance."""
 import base64
 from copy import deepcopy
@@ -52,7 +54,8 @@ def fixture(client, monkeypatch, tmp_path):
     monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-fake-pdf-region-tests-not-real")
     settings.cache_clear()
     monkeypatch.setattr(settings(), "storage_root", str(tmp_path / "private"))
-    monkeypatch.setattr(chat_provider, "create_client", lambda: (_ for _ in ()).throw(AssertionError("No live models")))
+    monkeypatch.setattr(outbound.httpx, "HTTPTransport", lambda: (_ for _ in ()).throw(AssertionError("No live models")))
+    monkeypatch.setattr(outbound, "resolve_public", lambda *a, **kw: ("8.8.8.8",))
     login(client)
     note_id = pdf_book(client)
     with SessionLocal() as db:

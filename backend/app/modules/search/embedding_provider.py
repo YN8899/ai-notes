@@ -2,35 +2,34 @@
 import json
 import math
 import time
-import httpx
+from app.shared import outbound
 from app.shared.config import settings
 from app.shared.errors import AppError
 
 MAX_RESPONSE_BYTES = 2 * 1024 * 1024
 
 
-def create_client():
-    return httpx.Client(timeout=httpx.Timeout(30, connect=5), trust_env=False, follow_redirects=False)
-
-
-def embed(texts, config):
+def embed(texts, config, *, before_send=None):
     if not 1 <= len(texts) <= 10 or any(not isinstance(t, str) or not 1 <= len(t) <= 800 for t in texts):
         raise AppError(422, "embedding_input_invalid", "向量输入超出单次限制")
     cfg = settings()
     usage = {}
     try:
-        deadline = time.monotonic() + 40
-        with create_client() as client:
-            with client.stream("POST", f"https://{config['workspace']}.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/embeddings",
-                               headers={"Authorization": "Bearer " + cfg.embedding_api_key.get_secret_value(), "Accept-Encoding": "identity"},
-                               json={"model": config["model"], "input": texts, "dimensions": config["dimensions"], "encoding_format": "float"}) as response:
-                if response.status_code != 200 or response.headers.get("content-encoding", "identity") != "identity":
-                    raise ValueError("status")
-                body = bytearray()
-                for block in response.iter_bytes():
-                    body.extend(block)
-                    if len(body) > MAX_RESPONSE_BYTES or time.monotonic() > deadline:
-                        raise ValueError("size")
+        errors = []
+        def gate():
+            try:
+                return before_send() if before_send is not None else True
+            except AppError as error:
+                errors.append(error)
+                return False
+        status, body = outbound.post_json(
+            f"https://{config['workspace']}.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/embeddings",
+            data=json.dumps({"model": config["model"], "input": texts, "dimensions": config["dimensions"],
+                "encoding_format": "float"}, ensure_ascii=False, allow_nan=False).encode("utf-8"),
+            headers={"Authorization": "Bearer " + cfg.embedding_api_key.get_secret_value(),
+                "Content-Type": "application/json", "Accept": "application/json"}, before_send=gate)
+        if status != 200:
+            raise ValueError("status")
         result = json.loads(body)
         raw_usage = result.get("usage", {})
         if isinstance(raw_usage, dict):
@@ -54,7 +53,11 @@ def embed(texts, config):
             norm = math.sqrt(sum(v * v for v in scaled))
             vectors[index] = [v / norm for v in scaled]
         return vectors, usage
-    except (httpx.HTTPError, ValueError, TypeError, KeyError, AttributeError, OverflowError):
+    except outbound.SendCancelled:
+        if errors:
+            raise errors[0]
+        raise AppError(409, "semantic_interrupted", "语义调用已取消，不会自动重试") from None
+    except (outbound.EndpointUnavailable, outbound.UnsafeDestination, ValueError, TypeError, KeyError, AttributeError, OverflowError):
         error = AppError(503, "embedding_response_invalid", "向量服务调用失败或响应无效，请手动发起新请求")
         error.usage = usage
         raise error from None

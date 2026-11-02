@@ -1,7 +1,7 @@
 from datetime import timedelta
 from uuid import UUID
 from fastapi import APIRouter, Request, Response, Depends, Query
-from sqlalchemy import select, update
+from sqlalchemy import select, update, delete
 from app.shared.dependencies import DB, CurrentUser, Admin, preauth_csrf, tab_preauth_csrf, auth_rate_limit
 from app.shared.models import User, AuthSession, Invite, ResetToken, Audit
 from app.shared.security import token, digest, session_csrf
@@ -90,6 +90,9 @@ def me(user: CurrentUser):
 @router.post("/auth/logout", response_model=s.OkOut)
 def logout(request: Request, response: Response, db: DB, user: CurrentUser):
     request.state.auth_session.revoked_at = utcnow()
+    from app.modules.notifications.models import PushSubscription
+    db.execute(delete(PushSubscription).where(PushSubscription.owner_id == user.id,
+        PushSubscription.session_id == request.state.auth_session.id))
     audit(db, user.id, "auth.logout", request.state.request_id, user.id)
     db.commit()
     if not request.state.tab_session:

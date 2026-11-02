@@ -24,17 +24,17 @@ def prepared(db, owner, data):
     source = card_sources.freeze(db, owner, data.source)
     if data.kind == "occlusion" and not source_context.is_visual(source):
         raise AppError(422, "card_visual_source_required", "遮挡卡片需要图片或单页 PDF")
-    if source_context.is_visual(source) and data.model != "deepseek-flash":
-        raise AppError(422, "vision_model_required", "图片和 PDF 卡片生成需要 DeepSeek Flash")
+    from app.modules.ai.compatible import resolve
+    resolve(data.provider, data.model, vision=source_context.is_visual(source))
     fingerprint = digest({"deck_id": str(data.deck_id), "kind": data.kind, "count": data.count,
-                          "model": data.model, "source": source})
+                          "model": data.model, **({"provider": data.provider} if data.provider != "deepseek" else {}), "source": source})
     return source, fingerprint
 
 
 def preview(db, owner, data):
     source, fingerprint = prepared(db, owner, data)
     return s.GenerationPreviewOut(preview_hash=fingerprint, source=card_sources.public(source),
-                                  kind=data.kind, count=data.count, model=data.model)
+                                  kind=data.kind, count=data.count, model=data.model, provider=data.provider)
 
 
 def prompt(data, source):
@@ -54,7 +54,7 @@ def prompt(data, source):
 
 
 def create(db, owner, data):
-    request_hash = digest(data.model_dump(mode="json"))
+    request_hash = digest(data.model_dump(mode="json", exclude={"provider"} if data.provider == "deepseek" else set()))
     previous = db.scalar(select(CardGeneration).where(CardGeneration.owner_id == owner, CardGeneration.request_key == data.request_key))
     if previous:
         if previous.request_hash != request_hash:
@@ -68,7 +68,7 @@ def create(db, owner, data):
     db.flush()
     values = data.source.model_dump(exclude={"kind"})
     instruction = prompt(data, source)
-    run = chat_service.create_run(db, owner, parent.id, RunCreate(request_key=data.request_key, model=data.model,
+    run = chat_service.create_run(db, owner, parent.id, RunCreate(request_key=data.request_key, model=data.model, provider=data.provider,
                                  prompt=instruction, **{data.source.kind: values}), commit=False)
     run.source = source
     # A generation is an isolated immutable system task, never a mutable chat history.
@@ -153,7 +153,7 @@ def output(db, row):
     run = db.get(AiRun, row.run_id)
     ids = list(db.scalars(select(Card.id).where(Card.generation_id == row.id, Card.owner_id == row.owner_id).order_by(Card.generation_ordinal)))
     return s.GenerationOut(id=row.id, deck_id=row.deck_id, request_key=row.request_key, kind=row.kind, count=row.count,
-        model=run.model, status=row.status, run_status=run.status, usage=run.usage, error_code=row.error_code,
+        model=run.model, provider=run.provider, status=row.status, run_status=run.status, usage=run.usage, error_code=row.error_code,
         source=card_sources.public(row.source), card_ids=ids, created_at=row.created_at, finished_at=row.finished_at)
 
 

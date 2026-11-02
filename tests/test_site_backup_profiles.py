@@ -20,11 +20,204 @@ from site_backup_support import SiteBackupError
 
 
 class ProfileTests(unittest.TestCase):
+    def test_realtime_profile_preserves_owner_cursor_and_predecessor_catalog(self):
+        previous = profiles.frozen_catalog(profiles.PERSONALIZATION_REVISION)
+        document = profiles.frozen_catalog(profiles.REALTIME_REVISION)
+        self.assertEqual(len(document['catalog']), 74)
+        self.assertEqual(sum(len(table['columns']) for table in document['catalog'].values()), 685)
+        self.assertEqual(len(document['migration_sources_sha256_lf']), 25)
+        self.assertEqual(set(document['catalog']) - set(previous['catalog']), {'notification_counters'})
+        for name in previous['tables']:
+            if name != 'notifications':
+                self.assertEqual(document['catalog'][name], previous['catalog'][name])
+        self.assertEqual(document['check_sqltext_variants'], previous['check_sqltext_variants'])
+        notices = document['catalog']['notifications']
+        seq = next(column for column in notices['columns'] if column['name'] == 'seq')
+        self.assertEqual((seq['type'], seq['nullable'], seq['identity']), ('BIGINT', False, None))
+        self.assertIn(['user_id', 'seq'], [item['columns'] for item in notices['unique_constraints']])
+        counter = document['catalog']['notification_counters']
+        self.assertEqual(counter['primary_key']['columns'], ['owner_id'])
+        self.assertEqual({column['name'] for column in counter['columns']}, {'owner_id', 'head_seq', 'read_revision'})
+        for filename, expected in previous['migration_sources_sha256_lf'].items():
+            self.assertEqual(document['migration_sources_sha256_lf'][filename], expected)
+        for filename, expected in document['migration_sources_sha256_lf'].items():
+            raw = (ROOT / 'backend/alembic/versions' / filename).read_bytes().replace(b'\r\n', b'\n')
+            self.assertEqual(hashlib.sha256(raw).hexdigest(), expected)
+        inspector = SimpleNamespace(get_table_names=lambda **kwargs: document['tables'])
+        with patch.object(profiles, 'inspect', return_value=inspector), \
+                patch.object(profiles, 'capture_catalog', return_value=deepcopy(document['catalog'])) as capture:
+            profiles.validate_frozen_schema(object(), profiles.REALTIME_REVISION)
+            capture.return_value['notifications']['unique_constraints'] = []
+            self.assert_invalid(profiles.validate_frozen_schema, object(), profiles.REALTIME_REVISION)
+
+    def test_personalization_profile_preserves_predecessor_and_owner_primary_key(self):
+        previous = profiles.frozen_catalog(profiles.TOOLS_REVISION)
+        document = profiles.frozen_catalog(profiles.PERSONALIZATION_REVISION)
+        self.assertEqual(len(document['catalog']), 73)
+        self.assertEqual(sum(len(table['columns']) for table in document['catalog'].values()), 681)
+        self.assertEqual(len(document['migration_sources_sha256_lf']), 24)
+        self.assertEqual(set(document['catalog']) - set(previous['catalog']),
+                         {'user_home_preferences', 'learning_analysis_previews', 'learning_analyses'})
+        self.assertEqual({name: document['catalog'][name] for name in previous['catalog']}, previous['catalog'])
+        self.assertEqual(document['check_sqltext_variants'], previous['check_sqltext_variants'])
+        preferences = document['catalog']['user_home_preferences']
+        self.assertEqual(preferences['primary_key']['columns'], ['owner_id'])
+        self.assertEqual({column['name'] for column in preferences['columns']},
+                         {'owner_id', 'preferences', 'revision', 'updated_at'})
+        analysis = document['catalog']['learning_analyses']
+        link = next(item for item in analysis['foreign_keys'] if item['name'] == 'fk_learning_analysis_run_owner')
+        self.assertEqual(link['columns'], ['owner_id', 'run_id'])
+        self.assertEqual(link['referred_columns'], ['owner_id', 'id'])
+        self.assertEqual(link['referred_table'], 'ai_runs')
+        for filename, expected in document['migration_sources_sha256_lf'].items():
+            raw = (ROOT / 'backend/alembic/versions' / filename).read_bytes().replace(b'\r\n', b'\n')
+            self.assertEqual(hashlib.sha256(raw).hexdigest(), expected)
+        guards = json.loads((ROOT/'ops/site-backup-profiles'/f'{profiles.PERSONALIZATION_REVISION}-guards.json').read_bytes())
+        with patch.object(profiles, 'capture_learning_guards', return_value=deepcopy(guards)) as capture:
+            profiles.validate_learning_guards(object(), profiles.PERSONALIZATION_REVISION)
+            capture.return_value['triggers'][0]['enabled'] = 'D'
+            self.assert_invalid(profiles.validate_learning_guards, object(), profiles.PERSONALIZATION_REVISION)
+
+    def test_tool_history_profile_preserves_predecessor_and_exact_owner_step_guards(self):
+        previous = profiles.frozen_catalog(profiles.PAGE_RETIREMENT_REVISION)
+        document = profiles.frozen_catalog(profiles.TOOLS_REVISION)
+        self.assertEqual(len(document['catalog']), 70)
+        self.assertEqual(sum(len(table['columns']) for table in document['catalog'].values()), 656)
+        self.assertEqual(len(document['migration_sources_sha256_lf']), 23)
+        self.assertEqual(set(document['catalog']) - set(previous['catalog']), {'ai_tool_calls'})
+        self.assertEqual([name for name in previous['tables'] if previous['catalog'][name] != document['catalog'][name]],
+                         ['ai_runs', 'ai_steps'])
+        runs = deepcopy(document['catalog']['ai_runs'])
+        extra = {'provider', 'provider_snapshot', 'tools', 'tool_scope', 'auth_session_id'}
+        self.assertEqual({column['name'] for column in runs['columns']} -
+                         {column['name'] for column in previous['catalog']['ai_runs']['columns']}, extra)
+        runs['columns'] = [column for column in runs['columns'] if column['name'] not in extra]
+        model = next(column for column in runs['columns'] if column['name'] == 'model')
+        self.assertEqual(model['type'], 'VARCHAR(256)')
+        model['type'] = 'VARCHAR(64)'
+        self.assertEqual(runs, previous['catalog']['ai_runs'])
+        calls = document['catalog']['ai_tool_calls']
+        foreign = {item['name']: item for item in calls['foreign_keys']}
+        self.assertEqual(foreign['fk_ai_tool_run_owner']['columns'], ['owner_id', 'run_id'])
+        self.assertEqual(foreign['fk_ai_tool_run_owner']['referred_columns'], ['owner_id', 'id'])
+        self.assertEqual(foreign['fk_ai_tool_step_run']['columns'], ['run_id', 'step_id'])
+        self.assertEqual(foreign['fk_ai_tool_step_run']['referred_columns'], ['run_id', 'id'])
+        self.assertEqual(set(document['check_sqltext_variants']['ai_tool_calls']), {'ai_tool_name', 'ai_tool_state'})
+        for filename, expected in document['migration_sources_sha256_lf'].items():
+            raw = (ROOT / 'backend/alembic/versions' / filename).read_bytes().replace(b'\r\n', b'\n')
+            self.assertEqual(hashlib.sha256(raw).hexdigest(), expected)
+        inspector = SimpleNamespace(get_table_names=lambda **kwargs: document['tables'])
+        with patch.object(profiles, 'inspect', return_value=inspector), \
+                patch.object(profiles, 'capture_catalog', return_value=deepcopy(document['catalog'])) as capture:
+            profiles.validate_frozen_schema(object(), profiles.TOOLS_REVISION)
+            next(item for item in capture.return_value['ai_tool_calls']['foreign_keys']
+                 if item['name'] == 'fk_ai_tool_step_run')['referred_columns'] = ['id', 'run_id']
+            self.assert_invalid(profiles.validate_frozen_schema, object(), profiles.TOOLS_REVISION)
+
+    def test_page_retirement_profile_preserves_history_and_active_position_predicate(self):
+        previous = profiles.frozen_catalog(profiles.OFFLINE_REVISION)
+        document = profiles.frozen_catalog(profiles.PAGE_RETIREMENT_REVISION)
+        self.assertEqual(len(document['catalog']), 69)
+        self.assertEqual(sum(len(table['columns']) for table in document['catalog'].values()), 637)
+        self.assertEqual(len(document['migration_sources_sha256_lf']), 22)
+        self.assertEqual(document['tables'], previous['tables'])
+        self.assertEqual(document['check_sqltext_variants'], previous['check_sqltext_variants'])
+        for name, expected in previous['catalog'].items():
+            actual = deepcopy(document['catalog'][name])
+            if name == 'note_pages':
+                marker = next(item for item in actual['columns'] if item['name'] == 'deleted_at')
+                self.assertEqual(marker, {'name': 'deleted_at', 'type': 'TIMESTAMP WITH TIME ZONE',
+                                         'nullable': True, 'default': None, 'identity': None, 'computed': None})
+                actual['columns'].remove(marker)
+                index = next(item for item in actual['indexes'] if item['name'] == 'uq_note_page_active_position')
+                self.assertEqual(index['columns'], ['note_id', 'position'])
+                self.assertTrue(index['unique'])
+                self.assertEqual(index['dialect_options']['postgresql_where'], '(deleted_at IS NULL)')
+                actual['indexes'].remove(index)
+                self.assertEqual(actual['indexes'],
+                                 [item for item in expected['indexes'] if item['name'] != 'uq_note_page_position'])
+                actual['indexes'] = deepcopy(expected['indexes'])
+                self.assertEqual(actual['unique_constraints'],
+                                 [item for item in expected['unique_constraints'] if item['name'] != 'uq_note_page_position'])
+                actual['unique_constraints'] = deepcopy(expected['unique_constraints'])
+            self.assertEqual(actual, expected)
+        for filename, expected in document['migration_sources_sha256_lf'].items():
+            raw = (ROOT / 'backend/alembic/versions' / filename).read_bytes().replace(b'\r\n', b'\n')
+            self.assertEqual(hashlib.sha256(raw).hexdigest(), expected)
+        inspector = SimpleNamespace(get_table_names=lambda **kwargs: document['tables'])
+        with patch.object(profiles, 'inspect', return_value=inspector), \
+                patch.object(profiles, 'capture_catalog', return_value=deepcopy(document['catalog'])) as capture:
+            profiles.validate_frozen_schema(object(), profiles.PAGE_RETIREMENT_REVISION)
+            active = next(item for item in capture.return_value['note_pages']['indexes']
+                          if item['name'] == 'uq_note_page_active_position')
+            active['dialect_options']['postgresql_where'] = '(deleted_at IS NOT NULL)'
+            self.assert_invalid(profiles.validate_frozen_schema, object(), profiles.PAGE_RETIREMENT_REVISION)
+
+    def test_offline_profile_adds_only_permanent_receipts_and_instance_epochs(self):
+        previous = profiles.frozen_catalog(profiles.PUSH_REVISION)
+        document = profiles.frozen_catalog(profiles.OFFLINE_REVISION)
+        self.assertEqual(len(document['catalog']), 69)
+        self.assertEqual(sum(len(table['columns']) for table in document['catalog'].values()), 636)
+        self.assertEqual(len(document['migration_sources_sha256_lf']), 21)
+        self.assertEqual(set(document['catalog']) - set(previous['catalog']),
+                         {'offline_sync_receipts', 'offline_sync_states'})
+        self.assertEqual({name: document['catalog'][name] for name in previous['catalog']}, previous['catalog'])
+        self.assertEqual(document['check_sqltext_variants'], previous['check_sqltext_variants'])
+        self.assertEqual(document['catalog']['offline_sync_states']['primary_key']['columns'], ['owner_id'])
+        self.assertEqual({item['name'] for item in document['catalog']['offline_sync_states']['columns']},
+                         {'owner_id', 'epoch', 'created_at'})
+        self.assertEqual({item['name'] for item in document['catalog']['offline_sync_receipts']['unique_constraints']},
+                         {'uq_offline_receipt_operation'})
+        for filename, expected in document['migration_sources_sha256_lf'].items():
+            raw = (ROOT / 'backend/alembic/versions' / filename).read_bytes().replace(b'\r\n', b'\n')
+            self.assertEqual(hashlib.sha256(raw).hexdigest(), expected)
+        guards = json.loads((ROOT/'ops/site-backup-profiles'/f'{profiles.OFFLINE_REVISION}-guards.json').read_text(encoding='utf-8'))
+        with patch.object(profiles, 'capture_learning_guards', return_value=deepcopy(guards)) as capture:
+            profiles.validate_learning_guards(object(), profiles.OFFLINE_REVISION)
+            capture.return_value['triggers'][0]['enabled'] = 'D'
+            self.assert_invalid(profiles.validate_learning_guards, object(), profiles.OFFLINE_REVISION)
+
+    def test_push_profile_adds_only_subscription_and_session_owner_constraint(self):
+        previous = profiles.frozen_catalog(profiles.M3_REVISION)
+        document = profiles.frozen_catalog(profiles.PUSH_REVISION)
+        self.assertEqual(len(document['catalog']), 67)
+        self.assertEqual(sum(len(table['columns']) for table in document['catalog'].values()), 623)
+        self.assertEqual(len(document['migration_sources_sha256_lf']), 20)
+        self.assertEqual(set(document['catalog']) - set(previous['catalog']), {'push_subscriptions'})
+        self.assertEqual(document['check_sqltext_variants'], previous['check_sqltext_variants'])
+        for name, expected in previous['catalog'].items():
+            actual = deepcopy(document['catalog'][name])
+            if name == 'sessions':
+                additions = [item for item in actual['unique_constraints'] if item['name'] == 'uq_sessions_user_id']
+                self.assertEqual(len(additions), 1)
+                self.assertEqual(additions[0]['columns'], ['user_id', 'id'])
+                self.assertEqual(additions[0]['flags'], {
+                    'deferrable': False, 'initially_deferred': False, 'validated': True})
+                indexes = [item for item in actual['indexes'] if item['name'] == 'uq_sessions_user_id']
+                self.assertEqual(len(indexes), 1)
+                self.assertEqual(indexes[0]['columns'], ['user_id', 'id'])
+                self.assertTrue(indexes[0]['unique'])
+                actual['unique_constraints'].remove(additions[0])
+                actual['indexes'].remove(indexes[0])
+            self.assertEqual(actual, expected)
+        for filename, expected in document['migration_sources_sha256_lf'].items():
+            raw = (ROOT / 'backend/alembic/versions' / filename).read_bytes().replace(b'\r\n', b'\n')
+            self.assertEqual(hashlib.sha256(raw).hexdigest(), expected)
+        guards = json.loads((ROOT/'ops/site-backup-profiles'/f'{profiles.PUSH_REVISION}-guards.json').read_text(encoding='utf-8'))
+        with patch.object(profiles, 'capture_learning_guards', return_value=deepcopy(guards)) as capture:
+            profiles.validate_learning_guards(object(), profiles.PUSH_REVISION)
+            capture.return_value['triggers'][0]['enabled'] = 'D'
+            self.assert_invalid(profiles.validate_learning_guards, object(), profiles.PUSH_REVISION)
+
     def test_quiz_and_reminder_profiles_preserve_predecessors_and_frozen_guards(self):
         previous = profiles.frozen_catalog(profiles.REVIEW_REVISION)["catalog"]
         for revision, tables, columns, migrations in ((profiles.QUIZ_REVISION,46,428,13),
                                                        (profiles.REMINDER_REVISION,48,445,14),
-                                                       (profiles.EVENT_REVISION,49,456,15)):
+                                                       (profiles.EVENT_REVISION,49,456,15),
+                                                       (profiles.SOCIAL_REVISION,53,483,16),
+                                                       (profiles.CHAT_REVISION,58,519,17),
+                                                       (profiles.COMMUNITY_REVISION,64,596,18),
+                                                       (profiles.M3_REVISION,66,613,19)):
             with self.subTest(revision=revision):
                 document = profiles.frozen_catalog(revision)
                 self.assertEqual(len(document['catalog']), tables)

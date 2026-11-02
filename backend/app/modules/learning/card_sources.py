@@ -30,11 +30,11 @@ def freeze(db, owner, selection):
     return source
 
 
-def validate(db, owner, source):
+def validate(db, owner, source, *, historical=False):
     if source is None:
         return None
     try:
-        note = source_context.validate(db, owner, source)
+        note = source_context.validate(db, owner, source, historical=historical)
         if source_context.is_visual(source):
             if len(source["pages"]) != 1:
                 raise ValueError("card_source_page_count")
@@ -70,7 +70,7 @@ def public(source):
 def read(db, owner, source):
     if source is None:
         raise AppError(404, "card_source_not_found", "卡片没有来源")
-    note = validate(db, owner, source)
+    note = validate(db, owner, source, historical=True)
     if source_context.is_text(source):
         result = text_context.read(db, owner, source)
         return s.SourceRead(**result.model_dump())

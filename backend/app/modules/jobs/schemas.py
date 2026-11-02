@@ -26,7 +26,16 @@ class JobOut(BaseModel):
 class NotificationOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: UUID
+    seq: int
     message: str
     read_at: datetime | None
     created_at: datetime
     target: Literal['reviews'] | None = None
+
+
+class NotificationFeedOut(BaseModel):
+    items: list[NotificationOut]
+    next_after_seq: int
+    has_more: bool
+    head_seq: int
+    read_revision: int

@@ -159,7 +159,7 @@ def test_freeze_revision_preview_dimensions_and_history_survive_reordering(monke
     actual_variant = SimpleNamespace(object_key=page["object_key"], bytes=page["bytes"])
     monkeypatch.setattr(context, "detail", lambda *_: book)
     monkeypatch.setattr(context, "notebook", lambda *_: book)
-    monkeypatch.setattr(context, "pages", lambda *_: [(actual_page, actual_file, actual_variant)])
+    monkeypatch.setattr(context, "pages", lambda *_, **__: [(actual_page, actual_file, actual_variant)])
     data = ImageInput(note_id=book.id, revision=3, page_id=actual_page.id, region=page["region"])
     preview = context.preview(None, uuid4(), data)
     assert (preview.width, preview.height, preview.crop_width, preview.crop_height, preview.planned_calls) == (103, 81, 24, 28, 1)

@@ -186,7 +186,8 @@ class GenerationPreview(Input):
     kind: Kind
     count: int = Field(strict=True, ge=1, le=20)
     source: Selection
-    model: Literal["deepseek-flash", "deepseek-v4-pro"] = "deepseek-flash"
+    provider: str = Field(default="deepseek", pattern=r"^[a-z][a-z0-9_-]{0,31}$")
+    model: str = Field(default="deepseek-flash", min_length=1, max_length=256)
 
 
 class GenerationCreate(GenerationPreview):
@@ -208,6 +209,7 @@ class GenerationPreviewOut(BaseModel):
     kind: Kind
     count: int
     model: str
+    provider: str = "deepseek"
     planned_calls: Literal[1] = 1
 
 
@@ -218,6 +220,7 @@ class GenerationOut(BaseModel):
     kind: Kind
     count: int
     model: str
+    provider: str = "deepseek"
     status: Literal["pending", "succeeded", "failed"]
     run_status: str
     usage: dict | None

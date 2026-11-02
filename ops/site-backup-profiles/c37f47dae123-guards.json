@@ -1,0 +1,22 @@
+{
+  "routines": [
+    {
+      "definition": "CREATE OR REPLACE FUNCTION public.reject_review_log_update()\n RETURNS trigger\n LANGUAGE plpgsql\nAS $function$ BEGIN RAISE EXCEPTION 'review logs are immutable'; END $function$\n",
+      "identity": "reject_review_log_update()"
+    }
+  ],
+  "triggers": [
+    {
+      "definition": "CREATE TRIGGER quiz_answer_reviews_immutable BEFORE UPDATE ON quiz_answer_reviews FOR EACH ROW EXECUTE FUNCTION reject_review_log_update()",
+      "enabled": "O",
+      "name": "quiz_answer_reviews_immutable",
+      "table_name": "quiz_answer_reviews"
+    },
+    {
+      "definition": "CREATE TRIGGER review_logs_immutable BEFORE UPDATE ON review_logs FOR EACH ROW EXECUTE FUNCTION reject_review_log_update()",
+      "enabled": "O",
+      "name": "review_logs_immutable",
+      "table_name": "review_logs"
+    }
+  ]
+}

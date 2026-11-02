@@ -1,3 +1,5 @@
+from app.shared import outbound
+from model_transport import install_model_transport
 from datetime import timedelta
 import base64
 import hashlib
@@ -31,7 +33,8 @@ def private_config(monkeypatch,tmp_path):
     monkeypatch.setattr(settings(),"storage_root",str(tmp_path/"private"))
     def no_live():
         raise AssertionError("Regression tests must not call the real model")
-    monkeypatch.setattr(chat_provider,"create_client",no_live)
+    monkeypatch.setattr(outbound.httpx, "HTTPTransport",no_live)
+    monkeypatch.setattr(outbound, "resolve_public", lambda *a, **kw: ("8.8.8.8",))
     yield
     settings.cache_clear()
 
@@ -81,7 +84,7 @@ def mock(monkeypatch,handler=None):
     def handle(request):
         calls.append(json.loads(request.content))
         return handler(request,len(calls)) if handler else httpx.Response(200,content=stream_bytes("资料内容[[p:1]]"))
-    monkeypatch.setattr(chat_provider,"create_client",lambda:httpx.Client(transport=httpx.MockTransport(handle)))
+    install_model_transport(monkeypatch, handle)
     return calls
 
 
@@ -155,10 +158,10 @@ def test_later_batch_failure_keeps_completed_work_and_never_automatically_retrie
     result=saved(client,row)
     assert result["status"]=="interrupted" and result["progress"]["completed_pages"]==8
     assert result["progress"]["current_pages"]==[9] and not result["progress"]["usage_complete"]
-    assert result["usage"]["total_tokens"]==18 and len(calls)==2
+    assert result["usage"] is None and len(calls)==2  # Second attempt usage is unknown, never a fabricated zero.
     with SessionLocal() as db:
         steps=list(db.scalars(select(AiStep).where(AiStep.run_id==UUID(row["id"])).order_by(AiStep.position)))
-        assert steps[0].answer and steps[1].status=="failed"
+        assert steps[0].answer and steps[0].usage["total_tokens"] == 18 and steps[1].status=="failed"
 
 
 def test_cancel_between_batches_prevents_any_remaining_calls(client,monkeypatch):

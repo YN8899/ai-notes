@@ -7,4 +7,4 @@ RUN useradd --create-home --uid 10001 appuser \
     && mkdir -p /var/lib/ai-notes/files \
     && chown appuser:appuser /var/lib/ai-notes/files
 USER appuser
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--no-access-log", "--proxy-headers", "--forwarded-allow-ips", "*"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--no-access-log", "--ws-max-size", "1024", "--ws-max-queue", "4", "--proxy-headers", "--forwarded-allow-ips", "*"]

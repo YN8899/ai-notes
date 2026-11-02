@@ -53,7 +53,13 @@ class AiRun(Entity, Base):
     conversation_id: Mapped[uuid.UUID] = mapped_column()
     request_key: Mapped[uuid.UUID] = mapped_column()
     request_hash: Mapped[str] = mapped_column(String(64))
-    model: Mapped[str] = mapped_column(String(64))
+    model: Mapped[str] = mapped_column(String(256))
+    provider: Mapped[str] = mapped_column(String(32), default="deepseek", server_default="deepseek")
+    provider_snapshot: Mapped[dict | None] = mapped_column(JSONB)
+    tools: Mapped[list[str]] = mapped_column(JSONB, default=list, server_default="[]")
+    tool_scope: Mapped[dict | None] = mapped_column(JSONB)
+    # Retain the identity after session GC so a missing originating session fails closed.
+    auth_session_id: Mapped[uuid.UUID | None] = mapped_column()
     prompt: Mapped[str] = mapped_column(Text)
     input_messages: Mapped[list] = mapped_column(JSONB)
     answer: Mapped[str] = mapped_column(Text, default="")
@@ -87,7 +93,8 @@ class AiStep(Entity, Base):
     error_code: Mapped[str | None] = mapped_column(String(64))
     __table_args__ = (
         UniqueConstraint("run_id", "position", name="uq_ai_step_position"),
-        CheckConstraint("kind IN ('read','reduce','answer') AND status IN ('running','succeeded','failed')", name="ai_step_state"),
+        UniqueConstraint("run_id", "id", name="uq_ai_step_run_id"),
+        CheckConstraint("kind IN ('read','reduce','answer','chat') AND status IN ('running','succeeded','failed')", name="ai_step_state"),
     )
 
 
@@ -104,4 +111,31 @@ class AiSavedNote(Entity, Base):
         ForeignKeyConstraint(["owner_id", "note_id"], ["notes.owner_id", "notes.id"], name="fk_saved_ai_note_owner"),
         UniqueConstraint("owner_id", "run_id", name="uq_saved_ai_run"),
         UniqueConstraint("note_id", name="uq_saved_ai_note"),
+    )
+
+
+class AiToolCall(Entity, Base):
+    __tablename__ = "ai_tool_calls"
+    owner_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"))
+    run_id: Mapped[uuid.UUID] = mapped_column()
+    step_id: Mapped[uuid.UUID] = mapped_column()
+    position: Mapped[int] = mapped_column(Integer)
+    provider_call_id: Mapped[str] = mapped_column(String(128))
+    tool_name: Mapped[str] = mapped_column(String(64))
+    arguments: Mapped[dict] = mapped_column(JSONB)
+    result: Mapped[str | None] = mapped_column(Text)
+    sources: Mapped[list] = mapped_column(JSONB, default=list)
+    status: Mapped[str] = mapped_column(String(16), default="pending")
+    error_code: Mapped[str | None] = mapped_column(String(64))
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    __table_args__ = (
+        ForeignKeyConstraint(["owner_id", "run_id"], ["ai_runs.owner_id", "ai_runs.id"], name="fk_ai_tool_run_owner"),
+        ForeignKeyConstraint(["run_id", "step_id"], ["ai_steps.run_id", "ai_steps.id"], name="fk_ai_tool_step_run"),
+        UniqueConstraint("run_id", "position", name="uq_ai_tool_position"),
+        UniqueConstraint("run_id", "provider_call_id", name="uq_ai_tool_provider_id"),
+        CheckConstraint("position >= 0 AND position < 6", name="ai_tool_position"),
+        CheckConstraint("tool_name IN ('search_notes','read_note_excerpt','learning_summary')", name="ai_tool_name"),
+        CheckConstraint("status IN ('pending','succeeded','failed','interrupted')", name="ai_tool_state"),
+        CheckConstraint("result IS NULL OR octet_length(result) <= 8192", name="ai_tool_result_size"),
+        Index("ix_ai_tool_owner_run", "owner_id", "run_id"),
     )

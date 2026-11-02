@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from sqlalchemy import String, Text, Integer, Boolean, DateTime, ForeignKey, CheckConstraint, Index, UniqueConstraint
+from sqlalchemy import String, Text, Integer, BigInteger, Boolean, DateTime, ForeignKey, CheckConstraint, Index, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 from app.shared.db import Base, utcnow
@@ -31,6 +31,7 @@ class AuthSession(Entity, Base):
     csrf_hash: Mapped[str] = mapped_column(String(64))
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    __table_args__ = (UniqueConstraint("user_id", "id", name="uq_sessions_user_id"),)
 
 
 class Invite(Entity, Base):
@@ -104,7 +105,12 @@ class Notification(Entity, Base):
     __tablename__ = "notifications"
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), index=True)
     event_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("outbox_events.id"), unique=True)
+    seq: Mapped[int] = mapped_column(BigInteger)
     message: Mapped[str] = mapped_column(String(256))
+    __table_args__ = (
+        UniqueConstraint("user_id", "seq", name="uq_notification_owner_seq"),
+        CheckConstraint("seq > 0", name="notification_seq_positive"),
+    )
     read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
@@ -118,3 +124,13 @@ from app.modules.learning import models as learning_models  # noqa: E402,F401
 from app.modules.learning import quiz_models, review_models  # noqa: E402,F401
 from app.modules.learning import reminder_models  # noqa: E402,F401
 from app.modules.learning import event_models  # noqa: E402,F401
+from app.modules.social import models as social_models  # noqa: E402,F401
+from app.modules.social import chat_models  # noqa: E402,F401
+from app.modules.community import models as community_models  # noqa: E402,F401
+from app.modules.exports import social_models as archive_models  # noqa: E402,F401
+from app.modules.notifications import models as push_models  # noqa: E402,F401
+from app.modules.offline import models as offline_models  # noqa: E402,F401
+
+from app.modules.notifications import feed_models  # noqa: E402,F401
+
+from app.modules.personalization import models as personalization_models  # noqa: E402,F401

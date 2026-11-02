@@ -6,7 +6,7 @@ from uuid import UUID
 
 from sqlalchemy import select
 
-from app.modules.ai import chat_provider, image_context, pdf_context, source_context
+from app.modules.ai import chat_provider, image_context, pdf_context, source_context, compatible, tool_runner
 from app.modules.ai.models import AiRun, AiStep
 from app.modules.files import service as files
 from app.modules.files.oss_storage import StorageUnavailable
@@ -57,10 +57,10 @@ def locked(db, run_id, *, access=True):
 
 def refresh_usage(db, row):
     steps = list(db.scalars(select(AiStep).where(AiStep.run_id == row.id)))
-    known = [step.usage for step in steps if step.usage]
-    row.usage = {key: sum(usage.get(key, 0) for usage in known) for key in ("prompt_tokens", "completion_tokens", "total_tokens")} if known else None
     complete = bool(steps) and all(step.status == "succeeded" and step.usage is not None
-                                  and {"prompt_tokens", "completion_tokens", "total_tokens"}.issubset(step.usage) for step in steps)
+        and {"prompt_tokens", "completion_tokens", "total_tokens"}.issubset(step.usage) for step in steps)
+    known = set.intersection(*(set(step.usage) & {"prompt_tokens", "completion_tokens", "total_tokens"} for step in steps)) if steps and all(step.usage is not None for step in steps) else set()
+    row.usage = {key: sum(step.usage[key] for step in steps) for key in sorted(known)} if known else None
     row.progress = {**row.progress, "usage_complete": complete}
 
 
@@ -69,7 +69,7 @@ def start_step(run_id, kind, numbers):
         row = locked(db, run_id)
         if not row:
             return None
-        source_context.validate(db, row.owner_id, row.source)
+        tool_runner.validate_material(db, row)
         position = row.progress["call_count"]
         if position >= row.progress["planned_calls"]:
             raise chat_provider.ProviderFailure("pdf_plan_invalid")
@@ -131,10 +131,16 @@ def call(run_id, secret, messages, kind, numbers):
     step_id = start_step(run_id, kind, numbers)
     if step_id is None:
         return None
-    stream = chat_provider.stream_chat(secret, "deepseek-flash", messages, max_tokens=4096 if kind == "answer" else 2048)
+    with SessionLocal() as db:
+        selected = compatible.for_run(db.get(AiRun, run_id))
+    stream = chat_provider.stream_chat(selected.secret, selected.model, messages,
+        max_tokens=4096 if kind == "answer" else 2048, endpoint=selected.endpoint,
+        provider=selected.provider, before_send=lambda: tool_runner.before_send(run_id))
     answer, usage, finish, last_saved = "", None, None, 0.0
     try:
         for event in stream:
+            if event.get("tool_calls"):
+                raise chat_provider.ProviderFailure("tools_not_enabled")
             answer += event.get("delta", "")
             usage, finish = event.get("usage", usage), event.get("finish", finish)
             if len(answer.encode("utf-8")) > (128000 if kind == "answer" else 16000):
@@ -221,9 +227,7 @@ def execute_pdf(run_id):
             row = db.get(AiRun, run_id)
             source, base = row.source, row.input_messages
             source_context.validate(db, row.owner_id, source)
-        secret = settings().deepseek_api_key.get_secret_value()
-        if not secret:
-            raise chat_provider.ProviderFailure("ai_not_configured")
+        secret = None  # Credentials are resolved per frozen run immediately before each call.
         groups = pdf_context.batches(source)
         notes = []
         for group in groups:

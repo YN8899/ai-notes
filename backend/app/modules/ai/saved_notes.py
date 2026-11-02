@@ -34,13 +34,18 @@ def list_saved(db, owner, conversation_id):
 
 def note_provenance(db, user, note_id):
     note = notes.owned(db, user, Note, note_id)
-    row = db.execute(select(AiSavedNote, AiRun.model).join(AiRun, AiRun.id == AiSavedNote.run_id)
+    row = db.execute(select(AiSavedNote, AiRun.model, AiRun.provider).join(AiRun, AiRun.id == AiSavedNote.run_id)
                      .where(AiSavedNote.note_id == note_id, AiSavedNote.owner_id == user.id,
                             AiRun.owner_id == user.id)).first()
     if not row:
         return None
-    saved, model = row
-    return s.SavedAnswerProvenanceOut(**metadata(saved, note).model_dump(), model=model)
+    saved, model, provider = row
+    return s.SavedAnswerProvenanceOut(**metadata(saved, note).model_dump(), model=model, provider=provider)
+
+
+def literal(text):
+    return [{"type": "paragraph", **({"content": [{"type": "text", "text": line}]} if line else {})}
+            for line in text.split("\n")]
 
 
 def note_content(run, source):
@@ -56,10 +61,6 @@ def note_content(run, source):
             cited.add(number)
             return f"（{source_label}{number} 页）"
         return match[0]
-
-    def literal(text):
-        return [{"type": "paragraph", **({"content": [{"type": "text", "text": line}]} if line else {})}
-                for line in text.split("\n")]
 
     answer = answer_document(run.answer)
     if answer is not None:
@@ -109,6 +110,21 @@ def save_answer(db, user, run_id, data):
         raise AppError(409, "answer_not_complete", "请等待完整回答生成后再保存为笔记")
     source = source_context.public_source(run.source)
     body, plain, cited = note_content(run, source)
+    from app.modules.ai.models import AiToolCall
+    tool_calls = list(db.scalars(select(AiToolCall).where(AiToolCall.owner_id == user.id,
+        AiToolCall.run_id == run.id, AiToolCall.status == "succeeded").order_by(AiToolCall.position)))
+    if tool_calls:
+        references = ["生成服务商：" + run.provider, "来源运行：" + str(run.id)]
+        for call in tool_calls:
+            for item in call.sources:
+                if item.get("kind") == "learning_summary":
+                    references.append(f"学习事实汇总：{item['date_from']} 至 {item['date_to']}（{item['timezone']}），描述性事实，不推断掌握程度")
+                else:
+                    references.append(f"{call.tool_name}: {item['title']} [{item['note_id']}] 版本 {item['revision']} 原文范围 [{item['start']},{item['end']})")
+        block = "\n".join(references)
+        body["content"].append({"type": "heading", "attrs": {"level": 2}, "content": [{"type": "text", "text": "工具来源"}]})
+        body["content"].extend(literal(block))
+        plain = plain_text(body)
     try:
         create = ns.NoteCreate(title=data.title, notebook_id=data.notebook_id, body_json=body, plain_text=plain)
     except ValueError:

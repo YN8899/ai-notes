@@ -32,12 +32,15 @@ from sqlalchemy.engine import make_url  # noqa: E402
 from sqlalchemy.dialects.postgresql import JSONB  # noqa: E402
 from sqlalchemy.exc import SQLAlchemyError  # noqa: E402
 
+from app.modules.ai.archive import RUN_RESTORE_DEFAULTS, RUN_FIELDS, validate_run as validate_ai_run, validate_tool as validate_ai_tool
 from app.modules.ai.schemas import RunOut  # noqa: E402
 from app.modules.ai.source_context import public_source  # noqa: E402
 from app.modules.ai.text_context import validate_snapshot  # noqa: E402
 from app.modules.exports.service import FIELDS  # noqa: E402
 from app.modules.exports.learning_archive import FIELDS as LEARNING_FIELDS  # noqa: E402
 from app.modules.exports.learning_restore import prepare as prepare_learning  # noqa: E402
+from app.modules.exports.social_archive import FIELDS as SOCIAL_FIELDS  # noqa: E402
+from app.modules.exports.social_restore import prepare as prepare_social  # noqa: E402
 from app.modules.files.models import UploadSession  # noqa: E402
 from app.modules.files.storage import LocalStorage  # noqa: E402
 from app.modules.notes.models import Folder  # noqa: E402
@@ -56,6 +59,7 @@ MODELS = {model.__tablename__: model for model in FIELDS}
 EXTRA_FIELDS = {
     "files": {"original_path", "original_unavailable_reason", "processing_status", "processing_error_code"},
     "file_variants": {"path"},
+    "social_archive_assets": {"path"},
 }
 TERMINAL_RUNS = {"succeeded", "cancelled", "interrupted", "failed", "truncated"}
 MIMES = {"image/jpeg", "image/png", "image/webp", "application/pdf"}
@@ -334,8 +338,12 @@ def _prepare(manifest, collections, prefix):
         # upload limit. Refuse a larger object before allocating its contents.
         _require(all(item["path"] == "data.json" or item["bytes"] <= MAX_OBJECT_BYTES
                      for item in manifest["payloads"]), "restore_object_too_large")
-        _require(type(manifest["version"]) is int and manifest["version"] in {1, 2, 3})
+        _require(type(manifest["version"]) is int and manifest["version"] in {1, 2, 3, 4, 5})
         old_excluded = {model.__tablename__ for model in LEARNING_FIELDS} if manifest['version']<3 else set()
+        if manifest['version'] < 4:
+            old_excluded |= {model.__tablename__ for model in SOCIAL_FIELDS}
+        if manifest["version"] < 5:
+            old_excluded.update({"ai_tool_calls", "user_home_preferences", "learning_analyses"})
         expected_tables = set(MODELS) - old_excluded - ({"ocr_documents"} if manifest["version"] == 1 else set())
         _require(set(collections) == expected_tables)
         rows, indexes, keys = {}, {}, {}
@@ -343,10 +351,16 @@ def _prepare(manifest, collections, prefix):
             required = set(FIELDS[model])
             if table == "files":
                 required.add("original_path")
-            elif table == "file_variants":
+            elif table in {"file_variants", "social_archive_assets"}:
                 required.add("path")
             rows[table] = []
             for record in collections.get(table, []):
+                if table == "note_pages" and manifest["version"] < 5:
+                    _require(record.get("deleted_at") is None)
+                    record = {**record, "deleted_at": None}
+                if table == "ai_runs" and manifest["version"] < 5:
+                    _require(not set(RUN_FIELDS) & set(record))
+                    record = {**record, **{k:v for k,v in RUN_RESTORE_DEFAULTS.items() if k in RUN_FIELDS}}
                 _require(required <= set(record) <= required | EXTRA_FIELDS.get(table, set()))
                 row = {name: _column_value(model.__table__.c[name], record[name]) for name in FIELDS[model]}
                 if "revision" in row:
@@ -355,11 +369,12 @@ def _prepare(manifest, collections, prefix):
                     if field in row:
                         _require(bool(row[field].strip()))
                 rows[table].append(row)
-            if table != "note_tags":
+            if table not in {"note_tags", "user_home_preferences"}:
                 indexes[table] = {str(row["id"]): row for row in rows[table]}
         _unique(rows["tags"], ("name",))
         _unique(rows["note_versions"], ("note_id", "revision"))
         _unique(rows["note_pages"], ("note_id", "file_id"))
+        _unique([row for row in rows["note_pages"] if row["deleted_at"] is None], ("note_id", "position"))
         _unique([row for row in rows["note_pages"] if row["pdf_page_number"] is not None], ("note_id", "pdf_page_number"))
         _unique(rows["pdf_imports"], ("note_id",))
         _unique(rows["pdf_imports"], ("source_file_id",))
@@ -454,9 +469,12 @@ def _prepare(manifest, collections, prefix):
         ocr_runs = {row["run_id"]: row for row in rows["ocr_documents"]}
         learning_runs = {row['run_id'] for table in ('card_generations','quiz_generations') for row in rows[table]}
         for row in rows["ai_runs"]:
-            _require(row["status"] in TERMINAL_RUNS and isinstance(row["usage"], (dict, type(None)))
+            _require(row["status"] in TERMINAL_RUNS | ({"queued", "running"} if manifest["version"] >= 5 else set()) and isinstance(row["usage"], (dict, type(None)))
                      and isinstance(row["progress"], (dict, type(None))) and bool(row["prompt"].strip()))
-            row.update(request_key=uuid4(), request_hash=hashlib.sha256(uuid4().bytes).hexdigest(), input_messages=[], lease_until=None)
+            validate_ai_run(row)
+            if row["status"] in {"queued", "running"}:
+                row.update(status="interrupted", error_code="restore_not_resumed", finished_at=datetime.now(timezone.utc))
+            row.update(request_key=uuid4(), request_hash=hashlib.sha256(uuid4().bytes).hexdigest(), input_messages=[], lease_until=None, auth_session_id=None)
             row["source"] = _source(row["source"], internal=True, notes=notes, versions=versions, pages=pages, files=files, variants=variants, keys=keys, pdf_imports=pdf_by_note, historical=row["id"] in ocr_runs or row['id'] in learning_runs)
             # API consumers must be able to read restored metadata, including
             # usage/progress. Do not normalize or rewrite its valid JSON.
@@ -468,7 +486,7 @@ def _prepare(manifest, collections, prefix):
         normalized_steps = 0
         for row in rows["ai_steps"]:
             _positive(row["position"], zero=True)
-            _require(row["kind"] in {"read", "reduce", "answer"} and row["status"] in {"running", "succeeded", "failed"}
+            _require(row["kind"] in ({"read", "reduce", "answer", "chat"} if manifest["version"] >= 5 else {"read", "reduce", "answer"}) and row["status"] in {"running", "succeeded", "failed"}
                      and isinstance(row["pages"], list) and isinstance(row["usage"], (dict, type(None))))
             for number in row["pages"]:
                 _positive(number)
@@ -476,6 +494,12 @@ def _prepare(manifest, collections, prefix):
             if row["status"] == "running":
                 row.update(status="failed", error_code="restore_not_resumed")
                 normalized_steps += 1
+        _unique(rows["ai_tool_calls"], ("run_id", "position"))
+        _unique(rows["ai_tool_calls"], ("run_id", "provider_call_id"))
+        for row in rows["ai_tool_calls"]:
+            validate_ai_tool(row, indexes["ai_runs"][str(row["run_id"])], indexes["ai_steps"][str(row["step_id"])])
+            if row["status"] == "pending":
+                row.update(status="interrupted", error_code="restore_not_resumed", finished_at=datetime.now(timezone.utc))
         for row in rows["ai_saved_notes"]:
             _require(isinstance(row["cited_page_numbers"], list))
             for number in row["cited_page_numbers"]:
@@ -491,6 +515,9 @@ def _prepare(manifest, collections, prefix):
                      and set(row["cited_page_numbers"]) <= {page["number"] for page in row["source"]["pages"]})
         prepare_learning(rows, restore_source=_source, source_context=dict(notes=notes, versions=versions,
             pages=pages, files=files, variants=variants, keys=keys, pdf_imports=pdf_by_note))
+        prepare_social(rows, collections, prefix=prefix, keys=keys)
+        from app.modules.personalization.archive import prepare_restore as prepare_personalization
+        prepare_personalization(rows)
         return rows, keys, normalized_steps
     except RestoreError:
         raise

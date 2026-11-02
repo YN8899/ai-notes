@@ -1,6 +1,6 @@
 from datetime import timedelta
 from uuid import uuid4
-from sqlalchemy import select, update, and_, or_, delete
+from sqlalchemy import select, update, and_, or_, delete, case
 from sqlalchemy.dialects.postgresql import insert
 from app.shared.db import SessionLocal, utcnow
 from app.shared.models import Job, Outbox, Notification, RateBucket, AuthSession, ResetToken
@@ -18,12 +18,19 @@ def enqueue(db, owner_id, data):
     return job
 
 
-def claim():
+def claim(*, kinds=None):
+    if kinds is not None and not kinds:
+        return None
     now = utcnow()
     with SessionLocal.begin() as db:
+        scope = Job.kind.in_(tuple(kinds)) if kinds is not None else True
         # Exhausted leases are terminal; they must not be claimed forever.
-        db.execute(update(Job).where(Job.status == "running", Job.lease_until <= now, Job.attempts >= Job.max_attempts).values(status="failed", worker_token=None, lease_until=None, error_code="lease_exhausted"))
-        stmt = select(Job).where(or_(and_(Job.status == "queued", Job.run_after <= now), and_(Job.status == "running", Job.lease_until <= now)), Job.attempts < Job.max_attempts).order_by(Job.run_after, Job.id).with_for_update(skip_locked=True).limit(1)
+        db.execute(update(Job).where(scope, Job.status == "running", Job.lease_until <= now, Job.attempts >= Job.max_attempts).values(status="failed", worker_token=None, lease_until=None, error_code="lease_exhausted"))
+        stmt = select(Job).where(scope, or_(and_(Job.status == "queued", Job.run_after <= now), and_(Job.status == "running", Job.lease_until <= now)), Job.attempts < Job.max_attempts).order_by(Job.run_after, Job.id).with_for_update(skip_locked=True).limit(1)
+        if kinds is not None and len(kinds) > 1:
+            # Rotate priority across kinds; FIFO within each kind stays stable.
+            rank = case({kind: index for index, kind in enumerate(kinds)}, value=Job.kind, else_=len(kinds))
+            stmt = stmt.order_by(None).order_by(rank, Job.run_after, Job.id)
         job = db.scalar(stmt)
         if not job:
             return None
@@ -73,7 +80,8 @@ def deliver_outbox():
     now = utcnow()
     with SessionLocal.begin() as db:
         events = db.scalars(select(Outbox).where(Outbox.delivered_at.is_(None)).order_by(Outbox.created_at, Outbox.id).with_for_update(skip_locked=True).limit(50)).all()
-        for event in events:
+        # Multiple workers lock counters in the same owner order.
+        for event in sorted(events, key=lambda row: (str(row.user_id), row.created_at, str(row.id))):
             if event.kind == "review.daily":
                 digest = db.scalar(select(DailyDigest).where(DailyDigest.job_id == event.job_id,
                                                             DailyDigest.owner_id == event.user_id))
@@ -86,7 +94,10 @@ def deliver_outbox():
                     # Consume stale/unattributable events without replaying old counts.
                     event.delivered_at = now
                     continue
-            db.execute(insert(Notification).values(id=uuid4(), user_id=event.user_id, event_id=event.id, message=event.payload["message"], created_at=now).on_conflict_do_nothing(index_elements=[Notification.event_id]))
+            from app.modules.notifications.feed import persist
+            notice = persist(db, event, now=now)
+            from app.modules.notifications.service import enqueue_notification
+            enqueue_notification(db, notice)
             event.delivered_at = now
             delivered += 1
     return delivered
@@ -96,5 +107,8 @@ def maintenance():
     now = utcnow()
     with SessionLocal.begin() as db:
         db.execute(delete(RateBucket).where(RateBucket.expires_at < now - timedelta(days=1)))
+        from app.modules.social.chat_models import RealtimeTicket
+        db.execute(delete(RealtimeTicket).where(or_(RealtimeTicket.expires_at <= now,
+            RealtimeTicket.session_id.in_(select(AuthSession.id).where(AuthSession.expires_at < now - timedelta(days=7))))))
         db.execute(delete(AuthSession).where(AuthSession.expires_at < now - timedelta(days=7)))
         db.execute(delete(ResetToken).where(ResetToken.expires_at < now - timedelta(days=7)))

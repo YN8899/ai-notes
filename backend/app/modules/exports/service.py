@@ -11,7 +11,8 @@ from datetime import date, datetime
 from sqlalchemy import select, text
 from sqlalchemy.exc import SQLAlchemyError
 
-from app.modules.ai.models import AiConversation, AiRun, AiSavedNote, AiStep
+from app.modules.ai.models import AiConversation, AiRun, AiSavedNote, AiStep, AiToolCall
+from app.modules.ai.archive import FIELDS as AI_TOOL_FIELDS, RUN_FIELDS
 from app.modules.ai.source_context import public_source
 from app.modules.ai.text_context import validate_snapshot
 from app.modules.files import service as files
@@ -19,6 +20,8 @@ from app.modules.files.models import File, FileVariant, NotePage, PdfImport
 from app.modules.notes.models import Folder, Note, Notebook, NoteTag, NoteVersion, Tag
 from app.modules.search.models import OcrDocument
 from app.modules.exports.learning_archive import FIELDS as LEARNING_FIELDS, sources as learning_sources
+from app.modules.exports.social_archive import FIELDS as SOCIAL_FIELDS, collect as collect_social
+from app.modules.exports.social_models import SocialArchiveAsset
 from app.modules.learning.models import CardGeneration
 from app.modules.learning.quiz_models import QuizGeneration, QuizGrading
 from app.shared.config import settings
@@ -28,6 +31,7 @@ from app.shared.models import AuthSession, Job, User
 
 
 # Deliberately exclude credentials, sessions, request hashes, leases and provider inputs.
+# push_subscriptions contains browser capabilities, never portable account data.
 FIELDS = {
     Folder: ("id", "created_at", "owner_id", "name", "parent_id", "revision", "updated_at"),
     Notebook: ("id", "created_at", "owner_id", "name", "folder_id", "revision", "updated_at"),
@@ -36,16 +40,22 @@ FIELDS = {
     NoteTag: ("owner_id", "note_id", "tag_id"),
     NoteVersion: ("id", "created_at", "owner_id", "note_id", "revision", "snapshot"),
     File: ("id", "created_at", "owner_id", "filename", "mime", "expected_bytes", "bytes", "sha256", "width", "height", "status", "error_code"),
-    NotePage: ("id", "created_at", "owner_id", "note_id", "file_id", "position", "revision", "pdf_page_number"),
+    NotePage: ("id", "created_at", "owner_id", "note_id", "file_id", "position", "revision", "pdf_page_number", "deleted_at"),
     FileVariant: ("id", "created_at", "file_id", "kind", "bytes"),
     PdfImport: ("id", "created_at", "owner_id", "note_id", "source_file_id", "status", "page_count", "completed_pages", "error_code"),
     AiConversation: ("id", "created_at", "owner_id", "title"),
     AiRun: ("id", "created_at", "owner_id", "conversation_id", "model", "prompt", "answer", "status", "usage", "error_code", "finished_at", "source", "progress"),
     AiStep: ("id", "created_at", "run_id", "position", "kind", "pages", "status", "answer", "usage", "error_code"),
+    AiToolCall: AI_TOOL_FIELDS[AiToolCall],
     AiSavedNote: ("id", "created_at", "owner_id", "run_id", "note_id", "source", "cited_page_numbers"),
     OcrDocument: ("id", "created_at", "owner_id", "note_id", "page_id", "file_id", "run_id", "source_sha256", "source_width", "source_height", "corrected_text", "reviewed", "revision", "updated_at"),
 }
+FIELDS[AiRun] += RUN_FIELDS
 FIELDS.update(LEARNING_FIELDS)
+FIELDS.update(SOCIAL_FIELDS)
+from app.modules.personalization.archive import FIELDS as PERSONALIZATION_FIELDS
+from app.modules.personalization.models import UserHomePreferences
+FIELDS.update(PERSONALIZATION_FIELDS)
 
 
 def check_session(owner_id, auth_session_id):
@@ -106,7 +116,7 @@ def create_archive(owner_id, auth_session_id):
                 raise AppError(401, "login_required", "会话已失效，请重新登录")
             owner_profile = {"id": str(owner.id), "username": owner.username, "display_name": owner.display_name}
             busy_job = db.scalar(select(Job.id).where(Job.owner_id == owner_id,
-                Job.kind.in_(("image.process", "pdf.import")), Job.status.in_(("queued", "running"))).limit(1))
+                Job.kind.in_(("image.process", "pdf.import", "community.publish")), Job.status.in_(("queued", "running"))).limit(1))
             busy_ai = db.scalar(select(AiRun.id).where(AiRun.owner_id == owner_id,
                 AiRun.status.in_(("queued", "running"))).limit(1))
             busy_upload = db.scalar(select(File.id).where(File.owner_id == owner_id,
@@ -123,7 +133,7 @@ def create_archive(owner_id, auth_session_id):
             for model, names in FIELDS.items():
                 checkpoint()
                 columns = [getattr(model, name) for name in names]
-                if model in (File, FileVariant):
+                if model in (File, FileVariant, SocialArchiveAsset):
                     columns.append(model.object_key)
                 query = select(*columns)
                 if model is FileVariant:
@@ -132,7 +142,8 @@ def create_archive(owner_id, auth_session_id):
                     query = query.join(AiRun, AiRun.id == AiStep.run_id).where(AiRun.owner_id == owner_id)
                 else:
                     query = query.where(model.owner_id == owner_id)
-                order = (model.note_id, model.tag_id) if model is NoteTag else (model.id,)
+                order = ((model.note_id, model.tag_id) if model is NoteTag else
+                         (model.owner_id,) if model is UserHomePreferences else (model.id,))
                 query = query.order_by(*order).limit(cfg.export_max_rows - total_rows + 1).execution_options(yield_per=1)
                 db.execute(text(f"SET LOCAL statement_timeout = {max(1, int((deadline - time.monotonic()) * 1000))}"))
                 records = []
@@ -141,7 +152,7 @@ def create_archive(owner_id, auth_session_id):
                     if total_rows > cfg.export_max_rows:
                         raise _too_large()
                     record = {name: row[name] for name in names}
-                    if model in (File, FileVariant):
+                    if model in (File, FileVariant, SocialArchiveAsset):
                         internal_keys[(model, record["id"])] = row["object_key"]
                     # Avoid constructing arbitrarily large metadata before checking it.
                     metadata_size += len(_json(record)) + 1
@@ -288,8 +299,25 @@ def create_archive(owner_id, auth_session_id):
             # before a corrupt but same-length variant can reach the browser.
             objects = [(path,key,size,expected_sha or learning_hashes.get(path))
                        for path,key,size,expected_sha in objects]
+            try:
+                objects.extend(collect_social(db, owner_id, collections, internal_keys,
+                    max_rows=cfg.export_max_rows, max_metadata_bytes=cfg.export_max_metadata_bytes,
+                    checkpoint=checkpoint, storage=files.storage()))
+            except AppError:
+                raise
+            except (ValueError, TypeError, KeyError, FileNotFoundError):
+                raise _incomplete() from None
+            except SQLAlchemyError:
+                raise
+            except Exception:
+                raise AppError(503, "storage_unavailable", "文件存储暂不可用，请稍后重试") from None
             checkpoint()
             data = _json({"collections": collections})
+            from app.modules.personalization.archive_contract import validate_collections
+            try:
+                validate_collections(json.loads(data)["collections"], str(owner_id), version=5)
+            except (ValueError, TypeError, KeyError):
+                raise _incomplete() from None
             if len(data) > cfg.export_max_metadata_bytes:
                 raise _too_large()
             data_bytes = len(data)
@@ -334,7 +362,7 @@ def create_archive(owner_id, auth_session_id):
                     payloads.append({"path": path, "bytes": len(content), "sha256": checksum})
                     del content
                 manifest = {
-                    "format": "ai-notes-export", "version": 3, "exported_at": utcnow().isoformat(),
+                    "format": "ai-notes-export", "version": 5, "exported_at": utcnow().isoformat(),
                     "owner": owner_profile,
                     "counts": {name: len(records) for name, records in collections.items()},
                     "resume_processing": False, "payloads": payloads,

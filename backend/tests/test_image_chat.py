@@ -1,3 +1,5 @@
+from app.shared import outbound
+from model_transport import install_model_transport
 """Private image/region context, bounded real-adapter payloads, and durable provenance."""
 
 import base64
@@ -38,7 +40,8 @@ def private_config(monkeypatch, tmp_path):
     def no_live():
         raise AssertionError("Image regression tests must never call a real model")
 
-    monkeypatch.setattr(chat_provider, "create_client", no_live)
+    monkeypatch.setattr(outbound.httpx, "HTTPTransport", no_live)
+    monkeypatch.setattr(outbound, "resolve_public", lambda *a, **kw: ("8.8.8.8",))
     yield
     settings.cache_clear()
 
@@ -96,7 +99,7 @@ def mock(monkeypatch, handler=None, answer="图片内容[[p:1]]"):
         calls.append(json.loads(request.content))
         return handler(request) if handler else httpx.Response(200, content=stream_bytes(answer))
 
-    monkeypatch.setattr(chat_provider, "create_client", lambda: httpx.Client(transport=httpx.MockTransport(handle)))
+    install_model_transport(monkeypatch, handle)
     return calls
 
 

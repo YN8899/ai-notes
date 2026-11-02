@@ -32,7 +32,11 @@ NEW_TABLES = {"pdf_imports", "ai_conversations", "ai_runs", "ai_steps", "ai_save
               "semantic_indexes", "semantic_chunks", "semantic_queries", "semantic_calls",
               "learning_decks", "learning_cards", "card_generations", "learning_quizzes", "review_items", "review_plans", "review_logs",
               "quiz_questions", "quiz_attempts", "quiz_answers", "quiz_operations", "quiz_answer_reviews", "quiz_generations", "quiz_gradings",
-              "user_learning_settings", "daily_review_digests", "learning_events"}
+              "user_learning_settings", "daily_review_digests", "learning_events",
+              "social_profiles", "friendships", "follows", "note_grants",
+              "chat_threads", "chat_messages", "chat_read_cursors", "chat_attachments", "realtime_tickets",
+              "community_posts", "community_snapshots", "community_assets", "community_comments", "community_reactions", "community_reports",
+              "social_archive_records", "social_archive_assets"}
 OWNED = re.compile(r"notes_restore_site_legacy_(?:source|target)_[0-9a-f]{24}")
 NOW = datetime(2026, 10, 25, 12, 0, tzinfo=timezone.utc)
 
@@ -88,7 +92,24 @@ def legacy_databases(tmp_path_factory, legacy_tools):
     assert re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}", container)
     url = configured_engine.url
     assert url.drivername == "postgresql+psycopg"
-    assert url.host in {"localhost", "127.0.0.1", "::1"} and url.port in {5432, 55432}
+    # A second, explicitly named isolated cluster lets full regressions run
+    # while browser acceptance owns the original test port. Keep every other
+    # host/identity/name guard and the real Docker cluster check below.
+    allowed_port = url.port in {5432, 55432} or (
+        container == "ai-notes-m3-full-db-1" and url.port == 55435)
+    if container == "ai-notes-m4-db-1" and url.port == 55435:
+        # Admit only this task's loopback, tmpfs Compose cluster. Never widen
+        # the port exception to an arbitrary local or persistent database.
+        result = subprocess.run(["docker", "inspect", container, "--format",
+            '{{json .Config.Labels}}\n{{json .NetworkSettings.Ports}}\n{{json .HostConfig.Tmpfs}}'],
+            capture_output=True, text=True, encoding="utf-8", timeout=15, check=True)
+        labels, ports, tmpfs = [json.loads(line) for line in result.stdout.splitlines()]
+        assert labels["com.docker.compose.project"] == "ai-notes-m4"
+        assert labels["com.docker.compose.service"] == "db"
+        assert ports["5432/tcp"] == [{"HostIp": "127.0.0.1", "HostPort": "55435"}]
+        assert "/var/lib/postgresql/data" in tmpfs
+        allowed_port = True
+    assert url.host in {"localhost", "127.0.0.1", "::1"} and allowed_port
     assert (url.database, url.username, url.password) == ("notes_test", "notes", "notes")
     # Confirm the Docker socket and Python connection identify the same test
     # cluster before creating any database, including the CI port mapping.
@@ -383,15 +404,21 @@ def test_legacy_local_roundtrip_preserves_all_old_tables_and_migrates_only_resto
     columns = {name: list(rows[0]) for name, rows in legacy_source.original_rows.items()}
     # Use the actual repository migrations, keeping the old row projection.
     for revision in ("d89f74a2136c", "16bd16083e39", "63b9d8343e02", "2ef16e7ca892", "7c0a9d2e4f61", "b81d4f0a6c32",
-                     "c4d72e9a1f03", "d58a3b7c901e", "e62a9c4f710b", "f73b5d8a201c", "84c6e9b302df"):
+                     "c4d72e9a1f03", "d58a3b7c901e", "e62a9c4f710b", "f73b5d8a201c", "84c6e9b302df",
+                     "a13f25b8c901", "b26f36c9d012", "c37f47dae123", "d48f58ebf234"):
         _alembic(target, "upgrade", revision)
         assert _revision(target) == revision
-    assert "No new upgrade operations detected" in _alembic(target, "check")
-    assert _rows(target, columns) == {**restored, "alembic_version": [{"version_num": "84c6e9b302df"}]}
+    assert _rows(target, columns) == {**restored, "alembic_version": [{"version_num": "d48f58ebf234"}]}
     current = _rows(target)
     assert set(current) - set(restored) == NEW_TABLES
     assert all(not current[name] for name in NEW_TABLES)
     assert all(row["pdf_page_number"] is None for row in current["note_pages"])
+    assert _stored_objects(target) == legacy_source.contents
+    # Preserve the explicit M3 assertions above, then rehearse all later
+    # migrations on the restored copy, retaining the exact legacy projection.
+    _alembic(target, "upgrade", "head")
+    assert "No new upgrade operations detected" in _alembic(target, "check")
+    assert _rows(target, columns) == {**restored, "alembic_version": [{"version_num": _revision(target)}]}
     assert _stored_objects(target) == legacy_source.contents
     _assert_source_unchanged(legacy_source)
 
@@ -416,7 +443,10 @@ def test_c39_27_table_profile_restores_and_migrates_only_isolated_copy(
     assert _revision(target) == "2ef16e7ca892" and len(_rows(target)) == 27
     assert _stored_objects(target) == source.contents
     _alembic(target, "upgrade", "head")
-    assert _revision(target) == "84c6e9b302df" and len(_rows(target)) == 49
+    revision = _revision(target)
+    assert revision in legacy_tools.tool.FROZEN_TABLE_NAMES
+    assert len(_rows(target)) == len(legacy_tools.tool.FROZEN_TABLE_NAMES[revision])
+    assert "No new upgrade operations detected" in _alembic(target, "check")
     assert _rows(target)["ocr_documents"] == []
     assert _rows(source) == before
 

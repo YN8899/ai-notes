@@ -38,6 +38,16 @@ REVIEW_REVISION = "d58a3b7c901e"
 QUIZ_REVISION = "e62a9c4f710b"
 REMINDER_REVISION = "f73b5d8a201c"
 EVENT_REVISION = "84c6e9b302df"
+SOCIAL_REVISION = "a13f25b8c901"
+CHAT_REVISION = "b26f36c9d012"
+COMMUNITY_REVISION = "c37f47dae123"
+M3_REVISION = "d48f58ebf234"
+PUSH_REVISION = "e59a69fc0345"
+OFFLINE_REVISION = "f6ab70ad1456"
+PAGE_RETIREMENT_REVISION = "f7bc81be2567"
+TOOLS_REVISION = "07bc81be2567"
+PERSONALIZATION_REVISION = "18cd92cf3678"
+REALTIME_REVISION = "29de03d04789"
 PRE_OCR_TABLE_NAMES = LEGACY_TABLE_NAMES | {
     "pdf_imports", "ai_conversations", "ai_runs", "ai_steps", "ai_saved_notes",
 }
@@ -49,10 +59,26 @@ QUIZ_TABLE_NAMES = REVIEW_TABLE_NAMES | {"quiz_questions", "quiz_attempts", "qui
                                        "quiz_answer_reviews", "quiz_generations", "quiz_gradings"}
 REMINDER_TABLE_NAMES = QUIZ_TABLE_NAMES | {"user_learning_settings", "daily_review_digests"}
 EVENT_TABLE_NAMES = REMINDER_TABLE_NAMES | {"learning_events"}
+SOCIAL_TABLE_NAMES = EVENT_TABLE_NAMES | {"social_profiles", "friendships", "follows", "note_grants"}
+CHAT_TABLE_NAMES = SOCIAL_TABLE_NAMES | {"chat_threads", "chat_messages", "chat_read_cursors", "chat_attachments", "realtime_tickets"}
+COMMUNITY_TABLE_NAMES = CHAT_TABLE_NAMES | {"community_posts", "community_snapshots", "community_assets", "community_comments", "community_reactions", "community_reports"}
+M3_TABLE_NAMES = COMMUNITY_TABLE_NAMES | {"social_archive_records", "social_archive_assets"}
+PUSH_TABLE_NAMES = M3_TABLE_NAMES | {"push_subscriptions"}
+OFFLINE_TABLE_NAMES = PUSH_TABLE_NAMES | {"offline_sync_receipts", "offline_sync_states"}
+TOOLS_TABLE_NAMES = OFFLINE_TABLE_NAMES | {"ai_tool_calls"}
+PERSONALIZATION_TABLE_NAMES = TOOLS_TABLE_NAMES | {"user_home_preferences", "learning_analysis_previews", "learning_analyses"}
+REALTIME_TABLE_NAMES = PERSONALIZATION_TABLE_NAMES | {"notification_counters"}
 FROZEN_TABLE_NAMES = {PRE_OCR_REVISION: PRE_OCR_TABLE_NAMES, OCR_REVISION: OCR_TABLE_NAMES,
                       SEMANTIC_REVISION: SEMANTIC_TABLE_NAMES, CARD_REVISION: CARD_TABLE_NAMES,
                       REVIEW_REVISION: REVIEW_TABLE_NAMES, QUIZ_REVISION: QUIZ_TABLE_NAMES,
-                      REMINDER_REVISION: REMINDER_TABLE_NAMES, EVENT_REVISION: EVENT_TABLE_NAMES}
+                      REMINDER_REVISION: REMINDER_TABLE_NAMES, EVENT_REVISION: EVENT_TABLE_NAMES,
+                      SOCIAL_REVISION: SOCIAL_TABLE_NAMES, CHAT_REVISION: CHAT_TABLE_NAMES,
+                      COMMUNITY_REVISION: COMMUNITY_TABLE_NAMES, M3_REVISION: M3_TABLE_NAMES,
+                      PUSH_REVISION: PUSH_TABLE_NAMES, OFFLINE_REVISION: OFFLINE_TABLE_NAMES,
+                      PAGE_RETIREMENT_REVISION: OFFLINE_TABLE_NAMES,
+                      TOOLS_REVISION: TOOLS_TABLE_NAMES,
+                      PERSONALIZATION_REVISION: PERSONALIZATION_TABLE_NAMES,
+                      REALTIME_REVISION: REALTIME_TABLE_NAMES}
 LEGACY_CATALOG_PATH = (Path(__file__).resolve().parents[1] / "ops" /
                        "site-backup-profiles" / f"{LEGACY_REVISION}.json")
 _MIGRATIONS = frozenset({
@@ -90,6 +116,17 @@ _QUIZ_RESTORED_CHECKS = {**_REVIEW_RESTORED_CHECKS,
     "quiz_questions": {"quiz_question_kind"}, "quiz_attempts": {"quiz_attempt_state"},
     "quiz_answers": {"quiz_answer_state"}, "quiz_generations": {"quiz_generation_state"},
     "quiz_gradings": {"quiz_grading_state"}}
+_SOCIAL_RESTORED_CHECKS = {**_QUIZ_RESTORED_CHECKS,
+    "social_profiles": {"social_profile_visibility"}, "friendships": {"friendship_status"}}
+_COMMUNITY_RESTORED_CHECKS = {**_SOCIAL_RESTORED_CHECKS,
+    "community_posts": {"community_post_status", "community_post_type"},
+    "community_snapshots": {"community_snapshot_status", "community_snapshot_type"},
+    "community_assets": {"community_asset_status"}, "community_reactions": {"community_reaction_kind"},
+    "community_reports": {"community_report_status"}}
+_M3_RESTORED_CHECKS = {**_COMMUNITY_RESTORED_CHECKS,
+    "social_archive_records": {"social_archive_kind"}, "social_archive_assets": {"social_archive_asset_role"}}
+_TOOLS_RESTORED_CHECKS = {**_M3_RESTORED_CHECKS,
+    "ai_tool_calls": {"ai_tool_name", "ai_tool_state"}}
 _CONSTRAINT_FLAGS = {"deferrable", "initially_deferred", "validated"}
 
 
@@ -388,7 +425,11 @@ def frozen_catalog(revision):
         _require(all(isinstance(table, dict) and set(table) == _TABLE_FIELDS
                      for table in document["catalog"].values()))
         variants = document["check_sqltext_variants"]
-        checks = (_QUIZ_RESTORED_CHECKS if revision in {QUIZ_REVISION, REMINDER_REVISION, EVENT_REVISION} else
+        checks = (_TOOLS_RESTORED_CHECKS if revision in {TOOLS_REVISION, PERSONALIZATION_REVISION, REALTIME_REVISION} else
+                  _M3_RESTORED_CHECKS if revision in {M3_REVISION, PUSH_REVISION, OFFLINE_REVISION, PAGE_RETIREMENT_REVISION} else
+                  _COMMUNITY_RESTORED_CHECKS if revision == COMMUNITY_REVISION else
+                  _SOCIAL_RESTORED_CHECKS if revision in {SOCIAL_REVISION, CHAT_REVISION} else
+                  _QUIZ_RESTORED_CHECKS if revision in {QUIZ_REVISION, REMINDER_REVISION, EVENT_REVISION} else
                   _REVIEW_RESTORED_CHECKS if revision == REVIEW_REVISION else
                   _CARD_RESTORED_CHECKS if revision == CARD_REVISION else
                   _SEMANTIC_RESTORED_CHECKS if revision == SEMANTIC_REVISION else _FROZEN_RESTORED_CHECKS)

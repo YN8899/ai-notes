@@ -1,61 +1,14 @@
-import { useMutation, useQuery } from '@tanstack/react-query'
-import { api, type AiCatalog, type AiConnection } from '../../api'
-import { NoteError } from '../notes/NoteError'
-import './ai.css'
+import {useMutation,useQuery} from '@tanstack/react-query'
+import {api,type AiCatalog,type AiConnection} from '../../api'
+import {NoteError} from '../notes/NoteError'
 import {SemanticIndexManager} from '../search/SemanticIndexManager'
-
-const testMessages: Record<string, string> = {
-  connected: '连接成功，可用模型已确认。',
-  credential_rejected: '共享服务凭据被拒绝，请管理员检查本机配置。',
-  provider_rate_limited: '服务商当前限流，请稍后手动重试。',
-  provider_unavailable: '服务商暂不可用，请稍后重试。',
-  provider_unreachable: '无法连接服务商，请稍后重试。',
-  provider_invalid_response: '服务商返回了无法识别的模型列表。',
-  models_unavailable: '共享账户暂无本应用支持的模型。',
+import './ai.css'
+const testMessages:Record<string,string>={connected:'连接成功，可用模型已确认。',credential_rejected:'共享服务凭据被拒绝，请管理员检查服务端配置。',provider_rate_limited:'服务商当前限流，请稍后手动重试。',provider_unavailable:'服务商暂不可用，请稍后重试。',provider_unreachable:'无法连接服务商，请稍后重试。',provider_invalid_response:'服务商返回了无法识别的模型列表。',models_unavailable:'共享账户未确认可用模型。'}
+function ProviderTest({provider,enabled,models}:{provider:string;enabled:boolean;models:string[]}){
+  const test=useMutation({mutationFn:()=>api<AiConnection>('/ai/connection-test?provider='+encodeURIComponent(provider),'POST',{}),retry:false})
+  return <><button type="button" className="secondary" disabled={!enabled||test.isPending} onClick={()=>test.mutate()}>{test.isPending?'正在测试此服务商…':'测试此服务商连接'}</button><NoteError error={test.error}/>{test.data?<div role="status"><p className={test.data.status==='valid'?'muted':'error'}>{testMessages[test.data.code]||'暂时无法确认此服务商的连接状态。'}</p><p className="muted">本次确认：{models.filter(id=>test.data.available_models.includes(id)).join('、')||'无'}</p></div>:null}</>
 }
-
-export default function AiSettings({ owner, admin }: { owner: string; admin: boolean }) {
-  const catalog = useQuery({ queryKey: ['ai', owner, 'providers'], queryFn: () => api<AiCatalog>('/ai/providers') })
-  const test = useMutation({
-    mutationFn: () => api<AiConnection>('/ai/connection-test', 'POST', {}),
-    retry: false,
-  })
-
-  return <>
-    <SemanticIndexManager owner={owner}/>
-    <section className="panel">
-      <div className="panel-heading"><h3>共享模型服务</h3><span className="badge">成员共用</span></div>
-      <p className="muted">管理员统一提供 DeepSeek 服务，所有登录成员共用，无需填写个人 API Key。</p>
-      <p className="muted">凭据由服务端保管，网页不会显示。AI 对话将在后续开放。</p>
-      <NoteError error={catalog.error || test.error}/>
-      {catalog.isPending ? <p role="status">正在读取模型设置…</p> : null}
-      {catalog.data ? <p role="status" className={catalog.data.platform_enabled ? 'muted' : 'error'}>
-        {catalog.data.platform_enabled ? '共享模型服务已配置。' : '共享模型服务尚未配置，请联系管理员。'}
-      </p> : null}
-      {admin ? <>
-        <div className="ai-credential-actions"><button className="secondary"
-          disabled={!catalog.data?.platform_enabled || test.isPending} onClick={() => test.mutate()}>
-          {test.isPending ? '正在测试…' : '测试连接'}
-        </button></div>
-        <p className="muted">连接测试仅读取服务商的模型列表，不发送笔记，也不生成回答。</p>
-      </> : null}
-      {test.data ? <p role="status" className={test.data.status === 'valid' ? 'muted' : 'error'}>
-        {testMessages[test.data.code] || '暂时无法确认连接状态，请重新测试。'}
-      </p> : null}
-    </section>
-    {catalog.data?.providers.map(provider => <section className="panel" key={provider.id}>
-      <h3>{provider.name}</h3>
-      <div className="table-wrap"><table>
-        <caption className="ai-model-caption">模型能力</caption>
-        <thead><tr><th>模型</th><th>文字</th><th>图片</th><th>流式</th>{admin ? <th>本次连接验证</th> : null}</tr></thead>
-        <tbody>{provider.models.map(model => <tr key={model.id}>
-          <td><strong>{model.name}</strong><small>{model.id}</small></td>
-          <td>{model.supports_text ? '支持' : '不支持'}</td>
-          <td>{model.supports_vision ? '支持' : '不支持'}</td>
-          <td>{model.supports_streaming ? '支持' : '不支持'}</td>
-          {admin ? <td>{test.data?.available_models.includes(model.id) ? '已确认' : '未确认'}</td> : null}
-        </tr>)}</tbody>
-      </table></div>
-    </section>)}
-  </>
+export default function AiSettings({owner,admin}:{owner:string;admin:boolean}){
+  const catalog=useQuery({queryKey:['ai',owner,'providers'],queryFn:()=>api<AiCatalog>('/ai/providers'),retry:false})
+  return <><SemanticIndexManager owner={owner}/><section className="panel"><div className="panel-heading"><h3>共享模型服务</h3><span className="badge">成员共用</span></div><p className="muted">管理员在服务端统一配置服务商与模型，成员可以按能力选择文字、视觉和工具模型。无需填写个人 API Key，网页不接收或展示服务端凭据、地址和请求头。</p><NoteError error={catalog.error}/>{catalog.isPending?<p role="status">正在读取模型目录…</p>:null}{catalog.data?<p role="status" className={catalog.data.platform_enabled?'muted':'error'}>{catalog.data.platform_enabled?'共享模型服务已配置。':'暂无可用共享模型，请联系管理员。'}</p>:null}{admin?<p className="muted">每个服务商的测试独立进行，只读取模型列表，不发送笔记或生成回答。</p>:null}</section>{catalog.data?.providers.map(provider=><section className="panel" key={owner+':'+provider.id}><div className="panel-heading"><h3>{provider.name}</h3><span className="badge">{provider.enabled?'已启用':'已停用'}</span></div><p className="muted">服务商编号：{provider.id}</p>{admin?<ProviderTest provider={provider.id} enabled={provider.enabled} models={provider.models.map(m=>m.id)}/>:null}<div className="table-wrap"><table><caption className="ai-model-caption">模型能力</caption><thead><tr><th>模型 / 原始 ID</th><th>文字</th><th>视觉</th><th>工具</th><th>流式</th></tr></thead><tbody>{provider.models.map(model=><tr key={model.id}><td><strong>{model.name}</strong><small>{model.id}</small></td><td>{model.supports_text?'支持':'不支持'}</td><td>{model.supports_vision?'支持':'不支持'}</td><td>{model.supports_tools?'支持':'不支持'}</td><td>{model.supports_streaming?'支持':'不支持'}</td></tr>)}</tbody></table></div></section>)}</>
 }

@@ -6,7 +6,7 @@ import time
 
 from sqlalchemy import func, select, update
 
-from app.modules.ai import chat_provider
+from app.modules.ai import chat_provider, compatible, tools
 from app.modules.ai.models import AiConversation, AiRun, AiStep
 from app.modules.ai.schemas import RunOut
 from app.shared.config import settings
@@ -36,6 +36,11 @@ def readable_source(source):
         raise AppError(409, prefix + "_source_unavailable", "回答来源记录已损坏，无法读取来源范围") from None
 
 
+def reserved_analysis_conversation(db, conversation_id):
+    from app.modules.personalization.analysis_service import is_conversation
+    return is_conversation(db, conversation_id)
+
+
 def quiz_conversation(db, conversation_id):
     from app.modules.learning.quiz_models import QuizGeneration, QuizGrading
     for model in (QuizGeneration, QuizGrading):
@@ -48,7 +53,7 @@ def conversation(db, owner, conversation_id):
     row = db.scalar(select(AiConversation).where(AiConversation.id == conversation_id, AiConversation.owner_id == owner))
     if not row:
         raise AppError(404, "conversation_not_found", "对话不存在")
-    if quiz_conversation(db, conversation_id):
+    if quiz_conversation(db, conversation_id) or reserved_analysis_conversation(db, conversation_id):
         raise AppError(404, "conversation_not_found", "对话不存在")
     from app.modules.search.models import OcrDocument
     if db.scalar(select(OcrDocument.id).join(AiRun, AiRun.id == OcrDocument.run_id).where(
@@ -65,7 +70,7 @@ def get_run(db, owner, run_id):
     row = db.scalar(select(AiRun).where(AiRun.id == run_id, AiRun.owner_id == owner))
     if not row:
         raise AppError(404, "run_not_found", "对话运行不存在")
-    if quiz_conversation(db, row.conversation_id):
+    if quiz_conversation(db, row.conversation_id) or reserved_analysis_conversation(db, row.conversation_id):
         raise AppError(404, "run_not_found", "对话运行不存在")
     readable_source(row.source)
     return row
@@ -79,9 +84,30 @@ def runs(db, owner, conversation_id):
     return rows
 
 
+def validate_history_tools(db, owner, item):
+    """A readable old answer is not permission to disclose stale tool data again.
+
+    Only the frozen material matters here. Historical provider configuration and
+    originating sessions are deliberately independent of the current turn.
+    """
+    if item.tools or item.tool_scope is not None:
+        try:
+            tools.validate_scope(db, owner, item.tool_scope)
+        except (chat_provider.ProviderFailure, AppError):
+            raise chat_provider.ProviderFailure("history_tool_source_unavailable") from None
+
+
 def create_run(db, owner, conversation_id, data, *, commit=True):
     parent = conversation(db, owner, conversation_id)
     payload = data.model_dump(mode="json")
+    if data.provider == "deepseek":
+        payload.pop("provider")
+    if data.tool_preview_hash is None:
+        payload.pop("tool_preview_hash")
+    if not data.tools:
+        payload.pop("tools")
+    if data.tool_scope is None:
+        payload.pop("tool_scope")
     if data.image is None:
         payload.pop("image")  # Preserve pre-image request hashes for existing text/PDF retries.
     if data.text is None:
@@ -96,8 +122,19 @@ def create_run(db, owner, conversation_id, data, *, commit=True):
             raise AppError(409, "request_key_conflict", "这次提交的内容已改变，请重新发送")
         readable_source(previous.source)
         return previous
-    if not settings().deepseek_api_key.get_secret_value():
-        raise AppError(503, "ai_not_configured", "共享模型服务尚未配置，请联系管理员")
+    selected = compatible.resolve(data.provider, data.model, tools=bool(data.tools))
+    if data.tools and data.tool_preview_hash is None:
+        raise AppError(422, "tool_preview_required", "请先预览并确认工具资料范围")
+    if not data.tools and data.tool_preview_hash is not None:
+        raise AppError(422, "tool_preview_without_tools", "未启用工具时不能提交工具范围确认")
+    try:
+        tool_scope = tools.freeze_scope(db, owner, data)
+    except AppError as error:
+        if data.tools and error.code in {"tool_scope_unavailable", "tool_scope_too_large"}:
+            raise AppError(409, "tool_preview_changed", "工具资料或授权范围已变化，请重新预览并确认") from None
+        raise
+    if data.tools and tools.preview_hash(data.tools, tool_scope) != data.tool_preview_hash:
+        raise AppError(409, "tool_preview_changed", "工具资料或授权范围已变化，请重新预览并确认")
     if db.scalar(select(AiRun.id).where(AiRun.owner_id == owner, AiRun.status.in_(ACTIVE)).limit(1)):
         raise AppError(409, "run_active", "已有回复正在生成，请等待或先取消")
     history = runs(db, owner, conversation_id)
@@ -129,9 +166,16 @@ def create_run(db, owner, conversation_id, data, *, commit=True):
         source = image_context.freeze(db, owner, data.image)
     elif data.pdf:
         source = pdf_context.freeze(db, owner, data.pdf)
-    if source_context.is_visual(source) and data.model != "deepseek-flash":
-        raise AppError(422, "vision_model_required", "图片和 PDF 页图提问需要支持图片的 DeepSeek Flash")
+    if source_context.is_visual(source) and data.tools:
+        raise AppError(422, "visual_tools_unsupported", "图片与 PDF 页图暂不支持组合工具，请关闭工具后发送")
+    selected = compatible.resolve(data.provider, data.model, vision=source_context.is_visual(source), tools=bool(data.tools))
     for item in history:
+        if item.status == "succeeded":
+            try:
+                validate_history_tools(db, owner, item)
+            except chat_provider.ProviderFailure:
+                raise AppError(409, "history_tool_source_unavailable",
+                    "历史回答的工具资料或学习统计已变化，无法继续发送旧上下文；请核对来源并新建对话") from None
         if item.status == "succeeded" and item.source:
             source_context.validate(db, owner, item.source)
             if source and (source["note_id"] != item.source["note_id"] or source_context.kind(source) != source_context.kind(item.source)):
@@ -157,7 +201,9 @@ def create_run(db, owner, conversation_id, data, *, commit=True):
     if not history:
         parent.title = data.prompt.strip()[:64]
     row = AiRun(owner_id=owner, conversation_id=conversation_id, request_key=data.request_key,
-                request_hash=request_hash, prompt=data.prompt, model=data.model, input_messages=messages, source=source)
+                request_hash=request_hash, prompt=data.prompt, model=data.model, input_messages=messages, source=source,
+                provider=data.provider, provider_snapshot=compatible.freeze(selected), tools=list(data.tools),
+                tool_scope=tool_scope, auth_session_id=db.info.get("auth_session_id"))
     if source_context.is_visual(source):
         groups = pdf_context.batches(source)
         row.progress = {"stage": "queued", "completed_pages": 0, "total_pages": len(source["pages"]),
@@ -172,11 +218,16 @@ def create_run(db, owner, conversation_id, data, *, commit=True):
 
 
 def recover(db):
+    from app.modules.ai.models import AiToolCall
     # A lost lease may have already incurred a charge. Never put it back in the queue.
     db.execute(update(AiRun).where(AiRun.status == "running", AiRun.lease_until < utcnow()).values(
         status="interrupted", error_code="worker_interrupted", finished_at=utcnow(), lease_until=None))
     db.execute(update(AiStep).where(AiStep.status == "running", AiStep.run_id.in_(
         select(AiRun.id).where(AiRun.status.not_in(ACTIVE)))).values(status="failed", error_code="run_interrupted"))
+
+    db.execute(update(AiToolCall).where(AiToolCall.status == "pending", AiToolCall.run_id.in_(
+        select(AiRun.id).where(AiRun.status.not_in(ACTIVE)))).values(
+        status="interrupted", error_code="run_interrupted", finished_at=utcnow()))
 
 
 def claim():
@@ -212,84 +263,58 @@ def save_progress(run_id, answer, usage, terminal=None, code=None):
 
 
 def execute(run_id):
-    answer, usage, finish = "", None, None
-    last_saved = 0.0
+    from app.modules.ai import source_context, tool_runner
     try:
         with SessionLocal() as db:
             row = db.get(AiRun, run_id)
-            model, messages, source = row.model, row.input_messages, row.source
-        from app.modules.ai import source_context
-        readable_source(source)
-        if not save_progress(run_id, answer, usage):
-            return
-        validate_execution_sources(run_id)
-        if source_context.is_visual(source):
+            if row is None:
+                return
+            readable_source(row.source)
+            visual = source_context.is_visual(row.source)
+        if visual:
             from app.modules.ai.pdf_chat import execute_pdf
             execute_pdf(run_id)
-            return
-        secret = settings().deepseek_api_key.get_secret_value()
-        if not secret:
-            raise chat_provider.ProviderFailure("ai_not_configured")
-        stream = chat_provider.stream_chat(secret, model, messages)
-        try:
-            for event in stream:
-                answer += event.get("delta", "")
-                if len(answer) > 64000:
-                    raise chat_provider.ProviderFailure("provider_invalid_response")
-                usage = event.get("usage", usage)
-                finish = event.get("finish", finish)
-                if time.monotonic() - last_saved >= 0.25:
-                    if not save_progress(run_id, answer, usage):
-                        return
-                    last_saved = time.monotonic()
-        finally:
-            stream.close()  # Closes the upstream connection on cancel/error as well.
-        if not finish or not answer:
-            raise chat_provider.ProviderFailure("provider_incomplete")
-        save_progress(run_id, answer, usage, "truncated" if finish == "length" else "succeeded",
-                      "output_limit" if finish == "length" else None)
-    except chat_provider.ProviderFailure as error:
-        save_progress(run_id, answer, usage, "interrupted" if answer else "failed", error.code)
-    except AppError as error:
-        save_progress(run_id, answer, usage, "interrupted" if answer else "failed", error.code)
-    except Exception:
-        # Do not log prompts, raw provider bodies or credentials, and never retry a POST.
-        try:
-            save_progress(run_id, answer, usage, "interrupted", "worker_interrupted")
-        except Exception:
-            pass  # Lease expiry will expose the interruption after database recovery.
+        else:
+            tool_runner.execute_chat(run_id)
+    except Exception as error:
+        tool_runner.fail(run_id, getattr(error, "code", "worker_interrupted"))
 
 
-def validate_execution_sources(run_id):
+def validate_execution_sources(run_id, *, db=None, row=None):
     """Recheck all frozen material immediately before any external model call.
 
     A text-only follow-up still contains earlier quotes. Losing access to a
     historical source while this run was queued must also stop that follow-up.
     """
     from app.modules.ai import source_context
-    with SessionLocal() as db:
-        row = db.get(AiRun, run_id)
-        from app.modules.search.service import validate_run
-        validate_run(db, row)
-        from app.modules.learning.card_generation import validate_run as validate_card_run
-        validate_card_run(db, row)
-        from app.modules.learning.quiz_generation import validate_run as validate_quiz_generation
-        from app.modules.learning.quiz_grading import validate_run as validate_quiz_grading
-        validate_quiz_generation(db, row)
-        validate_quiz_grading(db, row)
-        sources = [item.source for item in db.scalars(select(AiRun).where(
-            AiRun.owner_id == row.owner_id, AiRun.conversation_id == row.conversation_id,
-            AiRun.status == "succeeded")) if item.source is not None]
-        if row.source is not None:
-            sources.append(row.source)
-        for source in sources:
-            try:
-                readable_source(source)
-                source_context.validate(db, row.owner_id, source)
-            except (AppError, KeyError, TypeError, ValueError):
-                prefix = "text" if source_context.is_text(source) else "image" if source_context.is_image(source) else "pdf"
-                raise chat_provider.ProviderFailure(prefix + "_source_unavailable") from None
-
+    if db is None:
+        with SessionLocal() as owned_db:
+            return validate_execution_sources(run_id, db=owned_db, row=owned_db.get(AiRun, run_id))
+    from app.modules.search.service import validate_run
+    validate_run(db, row)
+    from app.modules.learning.card_generation import validate_run as validate_card_run
+    validate_card_run(db, row)
+    from app.modules.learning.quiz_generation import validate_run as validate_quiz_generation
+    from app.modules.learning.quiz_grading import validate_run as validate_quiz_grading
+    validate_quiz_generation(db, row)
+    validate_quiz_grading(db, row)
+    from app.modules.personalization.analysis_service import validate_run as validate_analysis_run
+    validate_analysis_run(db, row)
+    history = list(db.scalars(select(AiRun).where(
+        AiRun.owner_id == row.owner_id, AiRun.conversation_id == row.conversation_id,
+        AiRun.status == "succeeded")))
+    for item in history:
+        validate_history_tools(db, row.owner_id, item)
+    sources = [item.source for item in history if item.source is not None]
+    if row.source is not None:
+        sources.append(row.source)
+    for source in sources:
+        try:
+            readable_source(source)
+            source_context.validate(db, row.owner_id, source)
+        except (AppError, KeyError, TypeError, ValueError):
+            prefix = "text" if source_context.is_text(source) else "image" if source_context.is_image(source) else "pdf"
+            raise chat_provider.ProviderFailure(prefix + "_source_unavailable") from None
 
 def tick():
     run_id = claim()

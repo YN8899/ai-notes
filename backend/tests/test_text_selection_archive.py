@@ -1,3 +1,5 @@
+from app.shared import outbound
+from model_transport import install_model_transport
 """Text provenance survives an offline archive and an empty-database restore."""
 from copy import deepcopy
 import hashlib
@@ -39,7 +41,8 @@ def isolated_model(monkeypatch):
     def forbidden_live_client():
         raise AssertionError("Live model requests are forbidden in archive tests")
 
-    monkeypatch.setattr(chat_provider, "create_client", forbidden_live_client)
+    monkeypatch.setattr(outbound.httpx, "HTTPTransport", forbidden_live_client)
+    monkeypatch.setattr(outbound, "resolve_public", lambda *a, **kw: ("8.8.8.8",))
     yield
     settings.cache_clear()
 

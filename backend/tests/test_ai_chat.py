@@ -1,3 +1,5 @@
+from app.shared import outbound
+from model_transport import install_model_transport
 from datetime import timedelta
 import json
 from uuid import UUID, uuid4
@@ -23,7 +25,8 @@ def config(monkeypatch):
     settings.cache_clear()
     def no_live():
         raise AssertionError("Live model requests are forbidden in regression tests")
-    monkeypatch.setattr(provider, "create_client", no_live)
+    monkeypatch.setattr(outbound.httpx, "HTTPTransport", no_live)
+    monkeypatch.setattr(outbound, "resolve_public", lambda *a, **kw: ("8.8.8.8",))
     yield
     settings.cache_clear()
 
@@ -51,7 +54,7 @@ def mock_http(monkeypatch, response=None, handler=None):
     def handle(request):
         calls.append(request)
         return handler(request) if handler else httpx.Response(200, content=response or stream_bytes())
-    monkeypatch.setattr(provider, "create_client", lambda: httpx.Client(transport=httpx.MockTransport(handle)))
+    install_model_transport(monkeypatch, handle)
     return calls
 
 
@@ -76,7 +79,7 @@ def test_real_adapter_context_history_sse_and_duplicate_are_single_attempt(clien
     assert saved["usage"] == {"prompt_tokens": 10, "completion_tokens": 8, "total_tokens": 18}
     assert len(calls) == 1
     request = calls[0]
-    assert str(request.url) == provider.URL
+    assert request.url.host == "8.8.8.8" and request.headers["host"] == "api.deepseek.com" and request.url.path == "/chat/completions"
     assert request.headers["Authorization"] == "Bearer " + KEY
     payload = json.loads(request.content)
     assert payload["thinking"] == {"type": "disabled"} and payload["max_tokens"] == 4096
@@ -141,7 +144,7 @@ def test_cancel_while_streaming_preserves_saved_partial_and_closes_provider(clie
     login(client)
     row = submit(client, conversation(client)).json()
     closed = []
-    def fake(*_):
+    def fake(*_, **kwargs):
         try:
             yield {"delta":"已保存的内容"}
             mutate(client, "POST", f"/ai/runs/{row['id']}/cancel", {})
@@ -158,7 +161,7 @@ def test_cancel_while_streaming_preserves_saved_partial_and_closes_provider(clie
 def test_provider_failure_after_partial_keeps_answer_and_never_retries(client, monkeypatch):
     login(client)
     row = submit(client, conversation(client)).json()
-    def fake(*_):
+    def fake(*_, **kwargs):
         yield {"delta":"部分回答"}
         raise provider.ProviderFailure("provider_timeout")
     monkeypatch.setattr(provider, "stream_chat", fake)

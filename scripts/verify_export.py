@@ -21,7 +21,7 @@ import zipfile
 
 
 FORMAT = "ai-notes-export"
-VERSION = 3
+VERSION = 5
 MAX_TOTAL_BYTES = 512 * 1024 * 1024
 MAX_METADATA_BYTES = 32 * 1024 * 1024
 MAX_ROWS = 50_000
@@ -55,8 +55,11 @@ LEARNING_COLUMNS = {name:frozenset(('id created_at owner_id '+extra).split()) fo
     'daily_review_digests':'kind local_date timezone counts',
     'learning_events':'event_id kind note_id card_id quiz_id started_at ended_at request_hash',
 }.items()}
-TABLES = V2_TABLES + LEARNING_TABLES
-TABLES_BY_VERSION = {1: V1_TABLES, 2: V2_TABLES, 3: TABLES}
+V3_TABLES = V2_TABLES + LEARNING_TABLES
+SOCIAL_TABLES = ("social_archive_records", "social_archive_assets")
+V4_TABLES = V3_TABLES + SOCIAL_TABLES
+TABLES = V4_TABLES + ("ai_tool_calls", "user_home_preferences", "learning_analyses")
+TABLES_BY_VERSION = {1: V1_TABLES, 2: V2_TABLES, 3: V3_TABLES, 4: V4_TABLES, 5: TABLES}
 OWNED_TABLES = set(TABLES) - {"file_variants", "ai_steps"}
 UUID_TEXT = r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
 ASSET_PATH = re.compile(rf"objects/({UUID_TEXT})/(?:original|variants/{UUID_TEXT})")
@@ -218,7 +221,55 @@ def _metadata(archive, entry):
     return _json(data)
 
 
-def _references(collections, payloads, owner):
+def _ai_contract():
+    # Pure stdlib helper: no server imports, settings, credentials, DB or network.
+    import importlib.util
+    path = Path(__file__).resolve().parents[1] / "backend/app/modules/ai/history_contract.py"
+    spec = importlib.util.spec_from_file_location("_portable_ai_history_contract", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _ai_history(collections, indexed, owner, version):
+    contract = _ai_contract()
+    runs, steps = indexed["ai_runs"], indexed["ai_steps"]
+    for row in runs.values():
+        expected = contract.LEGACY_RUN_FIELDS | (set(contract.RUN_FIELDS) if version >= 5 else set())
+        _require(set(row) == expected, "invalid_ai_run_fields")
+        if version >= 5:
+            contract.validate_run(row)
+        else:
+            _valid_text(row["model"])
+            _require(0 < len(row["model"]) <= 64, "invalid_ai_model_history")
+    positions, chat_counts = set(), {}
+    for step in steps.values():
+        _require(set(step) == {"id","created_at","run_id","position","kind","pages","status","answer","usage","error_code"}, "invalid_ai_step_fields")
+        _require(step["run_id"] in runs, "missing_reference")
+        _require(_integer(step["position"]) and step["position"] >= 0, "invalid_ai_step")
+        key = (step["run_id"], step["position"])
+        _require(key not in positions, "duplicate_record");positions.add(key)
+        _require(step["kind"] in ({"read","reduce","answer","chat"} if version >= 5 else {"read","reduce","answer"}), "invalid_ai_step")
+        if step["kind"] == "chat":
+            source = runs[step["run_id"]]["source"]
+            _require(step["pages"] == [] and (source is None or isinstance(source, dict) and source.get("kind") == "text"), "invalid_ai_step")
+            chat_counts[step["run_id"]] = chat_counts.get(step["run_id"], 0) + 1
+    for identity, count in chat_counts.items():
+        _require(count <= (3 if runs[identity]["tools"] else 1), "invalid_ai_budget")
+    seen, ids, totals = set(), set(), {}
+    for row in collections.get("ai_tool_calls", []):
+        _require(version >= 5 and set(row) == contract.TOOL_FIELDS, "invalid_ai_tool_fields")
+        _require(row["run_id"] in runs and row["step_id"] in steps, "missing_reference")
+        contract.validate_tool(row, runs[row["run_id"]], steps[row["step_id"]])
+        for field in ("created_at", "finished_at"):
+            _require(row[field] is None and field == "finished_at" or isinstance(row[field], str) and datetime.fromisoformat(row[field]).utcoffset() is not None, "invalid_timestamp")
+        for key, seen_keys in (((row["run_id"],row["position"]),seen),((row["run_id"],row["provider_call_id"]),ids)):
+            _require(key not in seen_keys, "duplicate_record");seen_keys.add(key)
+        totals[row["run_id"]] = totals.get(row["run_id"], 0) + len((row["result"] or "").encode("utf-8"))
+        _require(totals[row["run_id"]] <= 24576, "invalid_ai_budget")
+
+
+def _references(collections, payloads, owner, version=4):
     payload_paths = set(payloads)
     indexed = {}
     rows = 0
@@ -232,7 +283,7 @@ def _references(collections, payloads, owner):
             _require(isinstance(row, dict), "invalid_record")
             if table in OWNED_TABLES:
                 _require(row.get("owner_id") == owner, "owner_mismatch")
-            if table != "note_tags":
+            if table not in {"note_tags", "user_home_preferences"}:
                 identity = _uuid(row.get("id"))
                 _require(identity not in by_id, "duplicate_record")
                 by_id[identity] = row
@@ -243,6 +294,14 @@ def _references(collections, payloads, owner):
         if nullable and value is None:
             return
         _require(_uuid(value) in indexed[table], "missing_reference")
+
+    _ai_history(collections, indexed, owner, version)
+    import importlib.util
+    path = Path(__file__).resolve().parents[1] / "backend/app/modules/personalization/archive_contract.py"
+    spec = importlib.util.spec_from_file_location("_portable_personalization", path)
+    personalization = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(personalization)
+    personalization.validate_collections(collections, owner, version)
 
     for row in collections["folders"]:
         ref(row, "parent_id", "folders", nullable=True)
@@ -311,9 +370,17 @@ def _references(collections, payloads, owner):
         ref(row, "file_id", "files")
         position = row.get("position")
         _require(_integer(position) and position >= 0, "invalid_page")
-        identity = (row["note_id"], position)
-        _require(identity not in positions, "duplicate_record")
-        positions.add(identity)
+        if version >= 5:
+            _require("deleted_at" in row, "invalid_page")
+            retired = row["deleted_at"]
+            _require(retired is None or isinstance(retired, str) and
+                     datetime.fromisoformat(retired).utcoffset() is not None, "invalid_page")
+        else:
+            _require(row.get("deleted_at") is None, "invalid_page")
+        if row.get("deleted_at") is None:
+            identity = (row["note_id"], position)
+            _require(identity not in positions, "duplicate_record")
+            positions.add(identity)
     for row in collections["pdf_imports"]:
         ref(row, "note_id", "notes")
         ref(row, "source_file_id", "files")
@@ -411,7 +478,194 @@ def _references(collections, payloads, owner):
                      "source_mismatch")
     if "learning_cards" in collections:
         _learning_references(collections, indexed, payloads, variants, versions, owner)
+    if "social_archive_records" in collections:
+        used_assets.update(_social_references(collections, indexed, payloads))
     _require(used_assets == payload_paths - {"data.json"}, "unreferenced_asset")
+
+
+def _social_references(collections, indexed, payloads):
+    """Validate inert, owner-bound history without importing server packages."""
+    fields = {
+        "profile": "bio subject details visibility revision",
+        "friendship": "peer status requester_is_self updated_at",
+        "follow": "peer",
+        "note_grant": "direction note_id peer revoked_at",
+        "chat_thread": "peer last_seq last_read_seq peer_read_seq",
+        "chat_message": "thread_id seq sender sender_is_self body client_message_id attachment_ids",
+        "chat_attachment": "thread_id filename pending",
+        "community_post": "title body_json plain_text subject post_type tags source_note_id source_revision revision status published_at updated_at moderation_reason",
+        "community_snapshot": "post_id version status title body_json plain_text subject post_type tags source_revision error_code pages",
+        "community_comment": "post_id body deleted_at",
+        "community_reaction": "post_id kind",
+        "community_report": "post_id reason status resolution resolved_at",
+    }
+    records = indexed["social_archive_records"]
+    sources = {kind: set() for kind in fields}
+
+    def string(value, maximum, nullable=False):
+        _require(nullable and value is None or isinstance(value, str) and len(value) <= maximum
+                 and "\x00" not in value, "invalid_social_text")
+        if value is not None:
+            value.encode("utf-8")
+
+    def timestamp(value, nullable=False):
+        _require(nullable and value is None or isinstance(value, str)
+                 and datetime.fromisoformat(value).utcoffset() is not None, "invalid_social_time")
+
+    def integer(value, minimum=0):
+        _require(type(value) is int and minimum <= value <= 9223372036854775807, "invalid_social_number")
+
+    def peer(value):
+        _require(isinstance(value, dict) and set(value) == {"id", "username", "display_name"}, "invalid_social_peer")
+        _uuid(value["id"])
+        string(value["username"], 32)
+        _require(re.fullmatch(r"[A-Za-z0-9_-]{3,32}", value["username"]) is not None, "invalid_social_peer")
+        string(value["display_name"], 64)
+
+    for row in collections["social_archive_records"]:
+        _require(set(row) == {"id", "created_at", "owner_id", "kind", "source_id", "payload"}, "invalid_social_fields")
+        kind, data = row["kind"], row["payload"]
+        required = set(fields.get(kind, "").split()) | {"offline_only"}
+        optional = {"source_note_id"} if kind == "community_snapshot" else set()
+        _require(kind in fields and isinstance(data, dict)
+                 and required <= set(data) <= required | optional
+                 and data["offline_only"] is True, "unsafe_social_history")
+        sources[kind].add(_uuid(row["source_id"]))
+        timestamp(row["created_at"])
+        if "peer" in data:
+            peer(data["peer"])
+        for field in ("note_id", "thread_id", "post_id"):
+            if field in data:
+                _uuid(data[field])
+        for field in ("updated_at", "published_at", "revoked_at", "deleted_at", "resolved_at"):
+            if field in data:
+                timestamp(data[field], nullable=field != "updated_at")
+        for field in ("revision", "version", "seq"):
+            if field in data:
+                integer(data[field], 1)
+        if kind == "profile":
+            for name, maximum in (("bio", 240), ("subject", 80), ("details", 4000)):
+                string(data[name], maximum)
+            _require(data["visibility"] in {"friends", "private"}, "invalid_social_visibility")
+        elif kind == "friendship":
+            _require(data["status"] in {"pending", "accepted", "rejected", "removed"}
+                     and type(data["requester_is_self"]) is bool, "invalid_social_relationship")
+        elif kind == "note_grant":
+            _require(data["direction"] in {"sent", "received"}, "invalid_social_relationship")
+        elif kind == "chat_thread":
+            for field in ("last_seq", "last_read_seq", "peer_read_seq"):
+                integer(data[field])
+            _require(max(data["last_read_seq"], data["peer_read_seq"]) <= data["last_seq"], "invalid_social_cursor")
+        elif kind == "chat_message":
+            peer(data["sender"])
+            _require(type(data["sender_is_self"]) is bool
+                     and data["sender_is_self"] == (data["sender"]["id"] == row["owner_id"]), "invalid_social_sender")
+            string(data["body"], 8000)
+            _require(isinstance(data["attachment_ids"], list) and len(data["attachment_ids"]) <= 5,
+                     "invalid_social_attachment")
+            attachment_ids = [_uuid(value) for value in data["attachment_ids"]]
+            _require(len(set(attachment_ids)) == len(attachment_ids), "duplicate_social_asset")
+            _require(isinstance(data["client_message_id"], str)
+                     and re.fullmatch(r"[A-Za-z0-9_-]{1,64}", data["client_message_id"]) is not None, "invalid_social_receipt")
+        elif kind == "chat_attachment":
+            string(data["filename"], 200)
+            _require(data["pending"] is True, "invalid_social_attachment")
+        elif kind in {"community_post", "community_snapshot"}:
+            string(data["title"], 200)
+            string(data["plain_text"], 1_048_576)
+            string(data["subject"], 80)
+            _require(isinstance(data["body_json"], dict) and data["post_type"] in {"note", "question", "experience", "resource"}
+                     and isinstance(data["tags"], list) and len(data["tags"]) <= 20, "invalid_social_post")
+            # Bound and validate nested authored JSON before database JSONB sees it.
+            stack = [(data["body_json"], 0)]
+            nodes = 0
+            while stack:
+                value, depth = stack.pop()
+                nodes += 1
+                _require(nodes <= 50000 and depth <= 64, "invalid_social_post")
+                if isinstance(value, dict):
+                    for key, child in value.items():
+                        string(key, 1048576)
+                        stack.append((child, depth + 1))
+                elif isinstance(value, list):
+                    stack.extend((child, depth + 1) for child in value)
+                elif isinstance(value, str):
+                    string(value, 1048576)
+            for tag in data["tags"]:
+                string(tag, 64)
+            if data["source_revision"] is not None:
+                integer(data["source_revision"], 1)
+            if kind == "community_post":
+                _require(data["status"] in {"draft", "published", "withdrawn", "hidden"}, "invalid_social_post")
+                if data["source_note_id"] is not None:
+                    _uuid(data["source_note_id"])
+                string(data["moderation_reason"], 500, nullable=True)
+            else:
+                _require(data["status"] in {"preparing", "ready", "failed", "cancelled"}
+                         and isinstance(data["pages"], list) and len(data["pages"]) <= MAX_ROWS, "invalid_social_post")
+                if data.get("source_note_id") is not None:
+                    _uuid(data["source_note_id"])
+                string(data["error_code"], 64, nullable=True)
+                positions, page_ids = set(), set()
+                for page in data["pages"]:
+                    _require(isinstance(page, dict) and set(page) == {"id", "position", "width", "height", "filename", "mime"}, "invalid_social_page")
+                    identity = _uuid(page["id"])
+                    integer(page["position"])
+                    _require(identity not in page_ids and page["position"] not in positions, "invalid_social_page")
+                    page_ids.add(identity)
+                    positions.add(page["position"])
+                    string(page["filename"], 200)
+                    _require(page["mime"] in {"image/png", "image/jpeg", "image/webp"}, "invalid_social_asset")
+                    for dimension in ("width", "height"):
+                        if page[dimension] is not None:
+                            integer(page[dimension], 1)
+        elif kind == "community_comment":
+            string(data["body"], 4000)
+        elif kind == "community_reaction":
+            _require(data["kind"] in {"like", "bookmark"}, "invalid_social_reaction")
+        elif kind == "community_report":
+            string(data["reason"], 500)
+            string(data["resolution"], 500, nullable=True)
+            _require(data["status"] in {"pending", "dismissed", "hidden"}, "invalid_social_report")
+    for row in records.values():
+        kind, data = row["kind"], row["payload"]
+        if kind in {"chat_message", "chat_attachment"}:
+            _require(data["thread_id"] in sources["chat_thread"], "missing_social_thread")
+        if kind == "community_snapshot":
+            _require(data["post_id"] in sources["community_post"], "missing_social_post")
+    paths, memberships = set(), set()
+    per_record = {}
+    for row in collections["social_archive_assets"]:
+        _require(set(row) == {"id", "created_at", "owner_id", "record_id", "source_id", "role", "filename", "mime", "bytes", "sha256", "path"}, "invalid_social_asset_fields")
+        _uuid(row["source_id"])
+        parent = records.get(_uuid(row["record_id"]))
+        _require(parent is not None, "missing_social_record")
+        timestamp(row["created_at"])
+        allowed = {"attachment"} if parent["kind"] in {"chat_message", "chat_attachment"} else {"original", "reading"} if parent["kind"] == "community_snapshot" else set()
+        _require(row["role"] in allowed, "invalid_social_asset_role")
+        string(row["filename"], 200)
+        _require(row["mime"] in {"image/jpeg", "image/png", "image/webp", "application/pdf", "text/plain"}, "invalid_social_asset")
+        integer(row["bytes"], 1)
+        _require(row["bytes"] <= 50 * 1024**2 and isinstance(row["sha256"], str)
+                 and re.fullmatch(r"[0-9a-f]{64}", row["sha256"]) is not None, "invalid_social_asset")
+        path = row["path"]
+        _require(path == f"objects/{row['id']}/original" and path in payloads
+                 and payloads[path]["bytes"] == row["bytes"] and payloads[path]["sha256"] == row["sha256"], "social_asset_mismatch")
+        identity = (row["record_id"], row["source_id"], row["role"])
+        _require(identity not in memberships and path not in paths, "duplicate_social_asset")
+        memberships.add(identity)
+        paths.add(path)
+        per_record.setdefault(row["record_id"], set()).add((row["source_id"], row["role"]))
+    for row in records.values():
+        if row["kind"] == "community_snapshot":
+            expected = {(page["id"], role) for page in row["payload"]["pages"] for role in ("original", "reading")}
+            _require(per_record.get(row["id"], set()) == expected, "missing_social_asset")
+        elif row["kind"] == "chat_attachment":
+            _require(per_record.get(row["id"], set()) == {(row["source_id"], "attachment")}, "missing_social_asset")
+        elif row["kind"] == "chat_message":
+            _require(per_record.get(row["id"], set()) == {(identity, "attachment") for identity in row["payload"]["attachment_ids"]},
+                     "missing_social_asset")
+    return paths
 
 
 def _learning_references(collections, indexed, payloads, variants, versions, owner):
@@ -617,7 +871,7 @@ def verify_archive(path):
             for table in tables:
                 _require(isinstance(collections[table], list) and _integer(counts[table]) and
                          counts[table] == len(collections[table]), "count_mismatch")
-            _references(collections, declared, owner_id)
+            _references(collections, declared, owner_id, manifest["version"])
             return dict(counts)
     except ValidationError:
         raise

@@ -337,6 +337,20 @@ def _references(connection, *, profile=None):
                 _require(isinstance(question, dict), "backup_schema_invalid")
                 if question.get("source") is not None:
                     source_pages(question["source"], f"quiz_attempts:{row['id']}:snapshot:{index}")
+    for table in ("chat_attachments", "social_archive_assets"):
+        if table in profile.tables:
+            for row in connection.execute(text(f"SELECT id,object_key,bytes,sha256 FROM public.{table} ORDER BY id")).mappings():
+                add(row["object_key"], f"{table}:{row['id']}", True, row["bytes"], row["sha256"])
+    if "community_assets" in profile.tables:
+        for row in connection.execute(text("SELECT a.*,s.status AS snapshot_status FROM public.community_assets a JOIN public.community_snapshots s ON s.id=a.snapshot_id ORDER BY a.id")).mappings():
+            required = row["status"] == "ready"
+            add(row["object_key"], f"community_assets:{row['id']}:reading", required, row["bytes"], row["sha256"])
+            add(row["original_object_key"], f"community_assets:{row['id']}:original", required, row["original_bytes"], row["original_sha256"])
+            if row["source_object_key"] or row["source_original_object_key"]:
+                if row["source_object_key"]:
+                    add(row["source_object_key"], f"community_assets:{row['id']}:source-reading", True, row["bytes"], row["sha256"])
+                if row["source_original_object_key"]:
+                    add(row["source_original_object_key"], f"community_assets:{row['id']}:source-original", True, row["original_bytes"], row["original_sha256"])
     return [objects[key] for key in sorted(objects)]
 
 
@@ -488,7 +502,7 @@ def verify_site_backup(path):
             keys.add(key)
             refs = item["references"]
             _require(isinstance(refs, list) and 0 < len(refs) <= MAX_ROWS
-                      and all(isinstance(ref, str) and len(ref) <= 160 and re.fullmatch(r"(?:files|file_variants|ai_runs|learning_cards|card_generations|quiz_questions|quiz_generations|quiz_attempts):[0-9a-f-]{36}(?::snapshot:[0-9]+)?(?::pages:[0-9]+)?", ref)
+                      and all(isinstance(ref, str) and len(ref) <= 160 and re.fullmatch(r"(?:files|file_variants|ai_runs|learning_cards|card_generations|quiz_questions|quiz_generations|quiz_attempts|chat_attachments|community_assets|social_archive_assets):[0-9a-f-]{36}(?::snapshot:[0-9]+)?(?::pages:[0-9]+)?(?::(?:original|reading|source-original|source-reading))?", ref)
                               and ref.split(":", 1)[0] in profile.tables for ref in refs)
                      and len(set(refs)) == len(refs))
             if profile.legacy:
@@ -579,6 +593,9 @@ def _normalize(connection, *, profile=None):
     profile = profile or _profile()
     commands = {
         "sessions": "UPDATE public.sessions SET revoked_at=now() WHERE revoked_at IS NULL",
+        "push_subscriptions": "DELETE FROM public.push_subscriptions",
+        "learning_analysis_previews": "DELETE FROM public.learning_analysis_previews",
+        "user_home_preferences": "UPDATE public.user_home_preferences SET preferences=jsonb_set(preferences, '{ai_analysis_enabled}', 'false'::jsonb)",
         "file_tickets": "DELETE FROM public.file_tickets",
         "password_resets": "DELETE FROM public.password_resets",
         "ai_credentials": "DELETE FROM public.ai_credentials",
@@ -591,7 +608,28 @@ def _normalize(connection, *, profile=None):
         "card_generations": "UPDATE public.card_generations SET status='failed',error_code='site_restore_interrupted',finished_at=now() WHERE status='pending'",
         "quiz_generations": "UPDATE public.quiz_generations SET status='failed',error_code='site_restore_interrupted',finished_at=now() WHERE status='pending'",
         "quiz_gradings": "UPDATE public.quiz_gradings SET status='failed',error_code='site_restore_interrupted',finished_at=now() WHERE status='pending'",
+        "realtime_tickets": "DELETE FROM public.realtime_tickets",
+        "community_snapshots": "UPDATE public.community_snapshots SET status='failed',error_code='site_restore_interrupted' WHERE status='preparing'",
     }
+    if "ai_tool_calls" in profile.tables:
+        # T32 history is portable evidence, never an authorization to resume.
+        connection.execute(text("UPDATE public.ai_runs SET auth_session_id=NULL"))
+        commands["ai_tool_calls"] = "UPDATE public.ai_tool_calls SET status='interrupted',error_code='site_restore_interrupted',finished_at=now() WHERE status='pending'"
+    # T34 durable counters/seq are application facts, preserved by site restore.
+    # Verify, never reset/resequence: otherwise existing after_seq clients can
+    # skip newly delivered notices after a restore. Account ZIP omits notices.
+    if "notification_counters" in profile.tables:
+        invalid = connection.execute(text("""SELECT EXISTS (
+            SELECT 1 FROM public.notifications n
+            LEFT JOIN public.notification_counters c ON c.owner_id=n.user_id
+            WHERE c.owner_id IS NULL OR n.seq>c.head_seq OR n.seq<=0
+            UNION ALL
+            SELECT 1 FROM public.notification_counters c
+            LEFT JOIN public.notifications n ON n.user_id=c.owner_id
+            GROUP BY c.owner_id,c.head_seq
+            HAVING c.head_seq<>coalesce(max(n.seq),0) OR c.head_seq<>count(n.id)
+        )""")).scalar_one()
+        _require(not invalid, "restore_notification_cursor_invalid")
     return {table: connection.execute(text(statement)).rowcount for table, statement in commands.items()
             if table in profile.tables}
 

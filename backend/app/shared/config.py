@@ -42,11 +42,16 @@ class Settings(BaseSettings):
     oss_access_key_secret: SecretStr = SecretStr("")
     oss_security_token: SecretStr = SecretStr("")
     deepseek_api_key: SecretStr = SecretStr("")
+    ai_provider_profiles: SecretStr = SecretStr("[]")
     embedding_enabled: bool = False
     embedding_api_key: SecretStr = SecretStr("")
     embedding_workspace: str = ""
     embedding_model: Literal["text-embedding-v4"] = "text-embedding-v4"
     embedding_dimensions: Literal[64, 128, 256, 512, 768, 1024, 1536, 2048] = 1024
+    push_enabled: bool = False
+    push_vapid_public_key: str = ""
+    push_vapid_private_key: SecretStr = SecretStr("")
+    push_vapid_subject: str = ""
 
     @field_validator("embedding_dimensions", mode="before")
     @classmethod

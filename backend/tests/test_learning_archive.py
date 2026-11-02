@@ -129,7 +129,7 @@ def test_v3_all_learning_collections_restore_and_read_source(export_account,rest
     with exports.create_archive(export_account.owner,export_account.session) as stream,path.open('wb') as out:
         shutil.copyfileobj(stream,out)
     manifest,collections = _metadata(path)
-    assert manifest['version']==3
+    assert manifest['version']==5
     assert all(collections[model.__tablename__] for model in FIELDS)
     assert restore_tool._load_verifier().verify_archive(path)==manifest['counts']
     _restore(restore_tool,path,target)
@@ -240,7 +240,8 @@ def test_whole_site_retains_all_learning_and_attempt_only_asset_without_replayin
     site_tool.backup_site(engine.url.render_as_string(hide_password=False),postgres_container,bundle,
         site_support.LocalBackupStorage(files.settings().storage_root),maintenance_confirmed=True)
     manifest=site_tool.verify_site_backup(bundle)
-    assert len(manifest['tables'])==49 and manifest['schema_revision']=='84c6e9b302df'
+    assert set(manifest['tables']) == set(site_tool.TABLE_NAMES)
+    assert len(manifest['tables']) == len(site_tool.FROZEN_TABLE_NAMES[manifest['schema_revision']])
     frozen=next(item for item in manifest['objects'] if item['key']==frozen_key)
     assert frozen['mandatory'] and frozen['references']==[f"quiz_attempts:{ids['attempt']}:snapshot:0:pages:0"]
     result=restore_site(site_tool,bundle,site_target)

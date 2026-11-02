@@ -3,7 +3,7 @@ from datetime import timedelta
 from uuid import UUID
 from sqlalchemy import select, update, cast, Float, case, func
 from app.shared.db import SessionLocal, utcnow
-from app.shared.models import Job, User
+from app.shared.models import Job, User, AuthSession
 from app.shared.config import settings
 from app.shared.errors import AppError
 from app.modules.search.semantic_models import SemanticIndex, SemanticChunk, SemanticQuery, SemanticCall, Vector
@@ -105,7 +105,7 @@ def create_index(db, owner, data):
                         chunk_count=len(chunks), job_id=job.id)
     db.add(row)
     db.flush()
-    job.payload = {"index_id": str(row.id)}
+    job.payload = {"index_id": str(row.id), "auth_session_id": str(db.info["auth_session_id"]) if db.info.get("auth_session_id") else None}
     for ordinal, chunk in enumerate(chunks):
         db.add(SemanticChunk(owner_id=owner, index_id=row.id, ordinal=ordinal,
                              dimensions=config["dimensions"], **chunk))
@@ -184,7 +184,13 @@ def process_job(claimed):
             # The durable receipt is committed before the only outbound POST.
             usage, error = {}, None
             try:
-                vectors, usage = embedding_provider.embed(texts, config)
+                def final_gate():
+                    with SessionLocal.begin() as guard_db:
+                        guard_index = guard_db.get(SemanticIndex, identity)
+                        _build_guard(guard_db, guard_index, claimed)
+                        _session_guard(guard_db, guard_index.owner_id, claimed["payload"].get("auth_session_id"))
+                        return True
+                vectors, usage = embedding_provider.embed(texts, config, before_send=final_gate)
             except AppError as exc:
                 usage, error = getattr(exc, "usage", {}), exc
             with SessionLocal.begin() as db:
@@ -284,7 +290,18 @@ def create_query(db, owner, data):
     db.commit()  # Running is an at-most-once receipt, including process interruption.
     usage = {}
     try:
-        vectors, usage = embedding_provider.embed([data.q], index.config)
+        session_id = db.info.get("auth_session_id")
+        def final_gate():
+            with SessionLocal.begin() as guard_db:
+                _owner(guard_db, owner)
+                _session_guard(guard_db, owner, session_id)
+                guard_row = guard_db.get(SemanticQuery, row.id)
+                guard_index = guard_db.get(SemanticIndex, index.id)
+                if not guard_row or guard_row.status != "running" or not guard_index or guard_index.owner_id != owner or guard_index.status != "active":
+                    raise AppError(409, "semantic_interrupted", "查询已中断，不会自动重试")
+                require_provider(guard_index.config)
+                return True
+        vectors, usage = embedding_provider.embed([data.q], index.config, before_send=final_gate)
         _owner(db, owner)
         require_provider(index.config)
         db.refresh(row)
@@ -331,3 +348,11 @@ def source(db, owner, identity):
     fields = {k: row[k] for k in ("id", "kind", "note_id", "title", "matched_field", "text", "source_revision",
               "ocr_revision", "page_id", "page_number", "file_id", "region", "reviewed")}
     return SearchSourceOut(**fields, match_start=chunk.start, match_end=chunk.end, match_hash=chunk.source_hash)
+
+
+
+def _session_guard(db, owner, identity):
+    if identity is not None:
+        session = db.get(AuthSession, UUID(str(identity)))
+        if not session or session.user_id != owner or session.revoked_at or session.expires_at <= utcnow():
+            raise AppError(401, "login_required", "会话已失效，请重新登录")

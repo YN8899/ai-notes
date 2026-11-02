@@ -64,12 +64,16 @@ def notifications(db: DB, user: CurrentUser, limit: int = Query(30, ge=1, le=100
         'target':'reviews' if kind=='review.daily' else None}) for notice,kind in events]
 
 
+@router.get("/notifications/feed", response_model=s.NotificationFeedOut)
+def notification_feed(db: DB, user: CurrentUser, after_seq: int = Query(0, ge=0, le=9223372036854775807), limit: int = Query(100, ge=1, le=100)):
+    from app.modules.notifications.feed import page
+    return page(db, user.id, after_seq, limit)
+
+
 @router.post("/notifications/{notification_id}/read", response_model=s.NotificationOut)
 def read_notification(notification_id: UUID, db: DB, user: CurrentUser):
-    n = db.scalar(select(Notification).where(Notification.id == notification_id, Notification.user_id == user.id).with_for_update())
-    if not n:
-        raise AppError(404, "not_found", "通知不存在")
-    n.read_at = n.read_at or utcnow()
+    from app.modules.notifications.feed import read
+    n = read(db, user.id, notification_id)
     db.commit()
     event = db.get(Outbox,n.event_id)
     return s.NotificationOut.model_validate(n).model_copy(update={

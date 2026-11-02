@@ -7,6 +7,8 @@ from app.modules.ai.image_schemas import ImageInput, ImageRegion
 
 
 class OcrCreate(ImageInput):
+    provider: str = Field(default="deepseek", pattern=r"^[a-z][a-z0-9_-]{0,31}$")
+    model: str = Field(default="deepseek-flash", min_length=1, max_length=256)
     request_key: UUID
 
 
@@ -43,6 +45,7 @@ class OcrDocumentOut(BaseModel):
     page_number: int
     region: ImageRegion | None
     model: str
+    provider: str = "deepseek"
     usage: dict[str, int] | None
     created_at: datetime
     updated_at: datetime

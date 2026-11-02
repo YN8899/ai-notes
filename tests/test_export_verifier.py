@@ -30,6 +30,14 @@ def encode(value):
     return json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
 
 
+def legacy_ai(tables):
+    tables=copy.deepcopy(tables)
+    for run in tables["ai_runs"]:
+        for field in ("provider","provider_snapshot","tools","tool_scope"):
+            run.pop(field)
+    return tables
+
+
 class ExportVerifierTests(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
@@ -59,15 +67,18 @@ class ExportVerifierTests(unittest.TestCase):
         reading = f"objects/{identity(8)}/variants/{identity(9)}"
         row("files", 8, original_path=original, status="ready", bytes=8)
         row("file_variants", 9, file_id=identity(8), kind="reading", path=reading, bytes=7)
-        row("note_pages", 10, note_id=identity(5), file_id=identity(8), position=0)
+        row("note_pages", 10, note_id=identity(5), file_id=identity(8), position=0, deleted_at=None)
         row("pdf_imports", 11, note_id=identity(5), source_file_id=identity(8))
         row("ai_conversations", 12)
         source = {"note_id": identity(5), "title": "合成来源", "revision": 1,
                   "kind": "image", "mode": "region", "pages": [{
                       "page_id": identity(10), "file_id": identity(8), "number": 1,
                       "reading_path": reading, "region": {"x": 0.5, "y": 0, "width": 0.5, "height": 1}}]}
-        row("ai_runs", 13, conversation_id=identity(12), source=source, answer="合成回答")
-        row("ai_steps", 14, run_id=identity(13))
+        row("ai_runs", 13, created_at="2026-10-20T00:00:00Z", conversation_id=identity(12), model="deepseek-flash",
+            prompt="合成问题", source=source, answer="合成回答", status="succeeded", usage=None, error_code=None,
+            finished_at="2026-10-20T00:00:00Z", progress=None, provider="deepseek", provider_snapshot=None, tools=[], tool_scope=None)
+        row("ai_steps", 14, created_at="2026-10-20T00:00:00Z", run_id=identity(13), position=0, kind="answer", pages=[1],
+            status="succeeded", answer="合成回答", usage=None, error_code=None)
         row("ai_saved_notes", 15, note_id=identity(6), run_id=identity(13), source=copy.deepcopy(source))
         self.assets = {original: b"original", reading: b"reading"}
 
@@ -210,7 +221,7 @@ class ExportVerifierTests(unittest.TestCase):
             self.reject("metadata_too_large")
 
     def test_unsupported_version_and_unsafe_processing_are_rejected(self):
-        self.write(manifest_change=lambda value: value.update(version=4))
+        self.write(manifest_change=lambda value: value.update(version=6))
         self.reject("unsupported_format")
         self.write(manifest_change=lambda value: value.update(version=True))
         self.reject("unsupported_format")
@@ -219,6 +230,7 @@ class ExportVerifierTests(unittest.TestCase):
 
     def test_v1_keeps_exact_legacy_collection_contract(self):
         tables = {name: rows for name, rows in self.tables.items() if name in verifier.V1_TABLES}
+        tables=legacy_ai(tables)
         self.write(tables=tables, manifest_change=lambda manifest: manifest.update(version=1))
         self.assertEqual(set(verifier.verify_archive(self.archive)), set(verifier.V1_TABLES))
         self.write(manifest_change=lambda manifest: manifest.update(version=1))
@@ -226,10 +238,100 @@ class ExportVerifierTests(unittest.TestCase):
 
     def test_v2_keeps_ocr_and_excludes_v3_learning_collections(self):
         tables={name:rows for name,rows in self.tables.items() if name in verifier.V2_TABLES}
+        tables=legacy_ai(tables)
         self.write(tables=tables,manifest_change=lambda manifest:manifest.update(version=2))
         self.assertEqual(set(verifier.verify_archive(self.archive)),set(verifier.V2_TABLES))
         self.write(manifest_change=lambda manifest:manifest.update(version=2))
         self.reject('invalid_collections')
+
+    def test_v3_keeps_learning_without_v4_social_history(self):
+        tables = {name: rows for name, rows in self.tables.items() if name in verifier.V3_TABLES}
+        tables=legacy_ai(tables)
+        self.write(tables=tables, manifest_change=lambda manifest: manifest.update(version=3))
+        self.assertEqual(set(verifier.verify_archive(self.archive)), set(verifier.V3_TABLES))
+        self.write(manifest_change=lambda manifest: manifest.update(version=3))
+        self.reject("invalid_collections")
+
+    def test_v4_legacy_pages_default_active_but_cannot_smuggle_retirement(self):
+        self.tables=legacy_ai({name:rows for name,rows in self.tables.items() if name in verifier.V4_TABLES})
+        for page in self.tables["note_pages"]:
+            page.pop("deleted_at")
+        self.write(manifest_change=lambda manifest: manifest.update(version=4))
+        self.assertEqual(set(verifier.verify_archive(self.archive)), set(verifier.V4_TABLES))
+        self.tables["note_pages"][0]["deleted_at"] = "2026-11-01T08:00:00+00:00"
+        self.write(manifest_change=lambda manifest: manifest.update(version=4))
+        self.reject("invalid_page")
+
+    def test_v5_requires_aware_page_retirement_marker(self):
+        self.tables["note_pages"][0]["deleted_at"] = "2026-11-01T08:00:00+00:00"
+        self.write()
+        self.assertEqual(verifier.verify_archive(self.archive)["note_pages"], 1)
+        for invalid in (True, 123, "2026-11-01T08:00:00"):
+            self.tables["note_pages"][0]["deleted_at"] = invalid
+            self.write()
+            self.reject("invalid_page")
+
+    def social_history(self):
+        stamp = "2026-11-01T08:00:00+00:00"
+        peer = {"id": identity(99), "username": "friend", "display_name": "好友"}
+        def record(number, kind, source, **payload):
+            row = dict(id=identity(number), owner_id=self.owner, created_at=stamp, kind=kind,
+                       source_id=identity(source), payload=dict(offline_only=True, **payload))
+            self.tables["social_archive_records"].append(row)
+            return row
+        record(100, "chat_thread", 200, peer=peer, last_seq=1, last_read_seq=0, peer_read_seq=1)
+        message = record(101, "chat_message", 201, thread_id=identity(200), seq=1, sender=peer,
+                         sender_is_self=False, body="对方发来的完整内容", client_message_id="message-1", attachment_ids=[identity(202)])
+        content = b"received-private-attachment"
+        path = f"objects/{identity(102)}/original"
+        self.tables["social_archive_assets"].append(dict(id=identity(102), owner_id=self.owner,
+            created_at=stamp, record_id=message["id"], source_id=identity(202), role="attachment",
+            filename="notes.txt", mime="text/plain", bytes=len(content), sha256=hashlib.sha256(content).hexdigest(), path=path))
+        self.assets[path] = content
+        return message
+
+    def test_v4_participant_history_and_received_attachment_are_valid(self):
+        self.social_history()
+        self.write()
+        self.assertEqual(verifier.verify_archive(self.archive)["social_archive_assets"], 1)
+
+    def test_social_history_cannot_be_an_active_grant_or_contain_unknown_fields(self):
+        row = self.social_history()
+        row["payload"]["offline_only"] = False
+        self.write()
+        self.reject("unsafe_social_history")
+        row["payload"]["offline_only"] = True
+        row["payload"]["session_token"] = "must-never-be-restored"
+        self.write()
+        self.reject("unsafe_social_history")
+
+    def test_social_history_foreign_owner_and_omitted_attachment_rejected(self):
+        self.social_history()
+        asset = self.tables["social_archive_assets"][0]
+        asset["owner_id"] = identity(99)
+        self.write()
+        self.reject("owner_mismatch")
+        asset["owner_id"] = self.owner
+        self.tables["social_archive_assets"].clear()
+        self.assets.pop(asset["path"])
+        self.write()
+        self.reject("missing_social_asset")
+
+    def test_social_asset_metadata_must_match_manifest_hash(self):
+        self.social_history()
+        self.tables["social_archive_assets"][0]["sha256"] = "0" * 64
+        self.write()
+        self.reject("social_asset_mismatch")
+
+    def test_social_message_requires_exported_thread_and_true_sender_identity(self):
+        row = self.social_history()
+        row["payload"]["sender_is_self"] = True
+        self.write()
+        self.reject("invalid_social_sender")
+        row["payload"]["sender_is_self"] = False
+        self.tables["social_archive_records"].pop(0)
+        self.write()
+        self.reject("missing_social_thread")
 
     def ocr(self):
         self.tables["notes"][0]["kind"] = "image"

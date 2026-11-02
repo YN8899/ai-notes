@@ -1,0 +1,23 @@
+import {lazy,Suspense,useState} from 'react'
+import {useQuery} from '@tanstack/react-query'
+import {api,date} from '../../api'
+import {NoteError} from '../notes/NoteError'
+import {downloadAsset,ProtectedImage} from './ProtectedAsset'
+import {queryString,type Page} from './social'
+const ReadOnlyBody=lazy(()=>import('./ReadOnlyBody'))
+const kinds:Record<string,string>={profile:'个人资料',friendship:'好友历史',follow:'关注历史',note_grant:'分享记录',chat_thread:'会话历史',chat_message:'聊天消息',chat_attachment:'聊天附件',community_post:'社区创作',community_snapshot:'发布副本',community_comment:'社区评论',community_reaction:'点赞与收藏',community_report:'举报记录'}
+const historyStates:Record<string,string>={pending:'待处理',accepted:'已接受',rejected:'已拒绝',removed:'已解除',draft:'草稿',published:'已发布',withdrawn:'已撤回',hidden:'已下架',preparing:'准备中',ready:'已完成',failed:'失败',cancelled:'已取消',friends:'仅好友',private:'仅自己',dismissed:'已驳回',like:'点赞',bookmark:'收藏'}
+interface RecordSummary {id:string;kind:string;title:string;created_at:string}
+interface RecordDetail extends RecordSummary {payload:Record<string,unknown>;assets:{id:string;filename:string;mime:string;bytes:number;role:string}[]}
+function Detail({owner,id,onBack}:{owner:string;id:string;onBack:()=>void}){
+  const [error,setError]=useState<unknown>(null),query=useQuery({queryKey:['social',owner,'archive',id],queryFn:()=>api<RecordDetail>('/social/archive/records/'+id)})
+  const p=query.data?.payload
+  const hasBody=!!p?.body_json&&typeof p.body_json==='object'&&!Array.isArray(p.body_json)&&Object.keys(p.body_json).length>0
+  const peer=p?.peer||p?.sender
+  return <section><button className="text-button" onClick={onBack}>返回恢复历史</button><NoteError error={query.error||error}/>{query.data&&p?<><h3>{kinds[query.data.kind]} · {query.data.title}</h3><small>{date(query.data.created_at)}</small>{peer&&typeof peer==='object'&&'display_name' in peer?<p>{String(peer.display_name)}</p>:null}{typeof p.body==='string'?<p className="social-prewrap">{p.body}</p>:null}{typeof p.plain_text==='string'&&!hasBody?<p className="social-prewrap">{p.plain_text}</p>:null}{hasBody?<Suspense fallback={<p>正在打开历史正文…</p>}><ReadOnlyBody body={p.body_json as Record<string,unknown>}/></Suspense>:null}{['bio','subject','details','reason','status','visibility','decision','kind'].map(key=>typeof p[key]==='string'?<p className="social-prewrap" key={key}>{({bio:'简介',subject:'学科',details:'详细资料',reason:'原因',status:'当时状态',visibility:'当时隐私',decision:'处理结果',kind:'互动类型'} as Record<string,string>)[key]}：{['status','visibility','decision','kind'].includes(key)?historyStates[String(p[key])]||String(p[key]):String(p[key])}</p>:null)}{query.data.assets.map(a=><div key={a.id}>{a.role==='reading'&&a.mime.startsWith('image/')?<ProtectedImage path={'/social/archive/assets/'+a.id+'/content'} alt={a.filename}/>:null}<button className="text-button" onClick={()=>void downloadAsset('/social/archive/assets/'+a.id+'/content',a.role==='reading'?a.filename.replace(/\.[^.]+$/,'')+'.reading.jpg':a.filename).catch(setError)}>下载历史{a.role==='reading'?'阅读图':a.role==='original'?'原件':'附件'}：{a.filename}</button></div>)}</>:<p role="status">正在读取恢复历史…</p>}</section>
+}
+export default function ArchiveHistory({owner}:{owner:string}){
+  const [kind,setKind]=useState(''),[cursor,setCursor]=useState(''),[selected,setSelected]=useState('')
+  const query=useQuery({queryKey:['social',owner,'archive','list',kind,cursor],queryFn:()=>api<Page<RecordSummary>>('/social/archive/records'+queryString({kind,cursor}))})
+  return <section className="panel"><h2>恢复的社交与社区历史</h2><p className="muted">账号归档恢复的消息、创作和附件保存在这里供本人阅读。好友、分享授权与公开发布不会因恢复自动重新生效。</p>{selected?<Detail owner={owner} id={selected} onBack={()=>setSelected('')}/>:<><label>历史类型<select aria-label="历史类型" value={kind} onChange={e=>{setKind(e.target.value);setCursor('')}}><option value="">全部历史</option>{Object.entries(kinds).map(([key,label])=><option key={key} value={key}>{label}</option>)}</select></label><NoteError error={query.error}/>{query.isPending?<p>正在读取恢复历史…</p>:query.data?.items.length?query.data.items.map(row=><article className="social-row" key={row.id}><div><strong>{kinds[row.kind]}</strong><p>{row.title}</p><small>{date(row.created_at)}</small></div><button className="secondary" onClick={()=>setSelected(row.id)}>阅读历史内容</button></article>):<p className="empty">此账号暂无恢复的历史记录。</p>}<div className="social-actions"><button className="text-button" disabled={!cursor} onClick={()=>setCursor('')}>历史首页</button><button className="text-button" disabled={!query.data?.next_cursor} onClick={()=>setCursor(query.data?.next_cursor||'')}>下一页历史</button></div></>}</section>
+}

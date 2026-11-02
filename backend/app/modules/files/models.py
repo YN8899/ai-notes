@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import (BigInteger, CheckConstraint, DateTime, ForeignKey,
-                        ForeignKeyConstraint, Integer, String, UniqueConstraint)
+                        ForeignKeyConstraint, Index, Integer, String, UniqueConstraint, text)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.shared.db import Base
@@ -53,11 +53,13 @@ class NotePage(Entity, Base):
     position: Mapped[int] = mapped_column(Integer)
     revision: Mapped[int] = mapped_column(Integer, default=1)
     pdf_page_number: Mapped[int | None] = mapped_column(Integer)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     __table_args__ = (
         ForeignKeyConstraint(["owner_id", "note_id"], ["notes.owner_id", "notes.id"], name="fk_page_note_owner"),
         ForeignKeyConstraint(["owner_id", "file_id"], ["files.owner_id", "files.id"], name="fk_page_file_owner"),
         UniqueConstraint("note_id", "file_id", name="uq_note_page_file"),
-        UniqueConstraint("note_id", "position", name="uq_note_page_position"),
+        Index("uq_note_page_active_position", "note_id", "position", unique=True,
+              postgresql_where=text("deleted_at IS NULL")),
         UniqueConstraint("note_id", "pdf_page_number", name="uq_note_pdf_page_number"),
         CheckConstraint("pdf_page_number IS NULL OR pdf_page_number > 0", name="pdf_page_number_positive"),
         CheckConstraint("position >= 0 AND revision > 0", name="page_position_revision"),

@@ -1,3 +1,5 @@
+from app.shared import outbound
+from model_transport import install_model_transport
 """Frozen rich-text selections use codepoint offsets and never send the full note."""
 from copy import deepcopy
 import hashlib
@@ -25,7 +27,8 @@ from test_ai_chat import conversation, mock_http, read, submit
 def isolated_model(monkeypatch):
     monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-fake-text-selection-tests-not-real")
     settings.cache_clear()
-    monkeypatch.setattr(chat_provider, "create_client", lambda: (_ for _ in ()).throw(AssertionError("No live model")))
+    monkeypatch.setattr(outbound.httpx, "HTTPTransport", lambda: (_ for _ in ()).throw(AssertionError("No live model")))
+    monkeypatch.setattr(outbound, "resolve_public", lambda *a, **kw: ("8.8.8.8",))
     yield
     settings.cache_clear()
 
@@ -92,7 +95,8 @@ def test_api_worker_pro_model_only_sends_quote_and_history_keeps_it(client, monk
     assert selection["quote"] in content
     assert "未选择的秘密" not in content and "后文秘密" not in content and "客户端伪造" not in content
     with SessionLocal() as db:
-        assert not list(db.scalars(select(AiStep)))
+        steps = list(db.scalars(select(AiStep)))
+        assert len(steps) == 1 and steps[0].kind == "chat" and steps[0].status == "succeeded"
     followup = submit(client, cid, "继续解释", previous_run_id=row["id"])
     assert followup.status_code == 201, followup.text
     with SessionLocal() as db:

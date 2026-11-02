@@ -135,6 +135,8 @@ def complete_upload(db, user, upload_id, revision):
     require_idle(db, note.id)
     if upload.status == "completed":
         page = db.scalar(select(NotePage).where(NotePage.note_id == note.id, NotePage.file_id == upload.file_id))
+        if page is None or page.deleted_at is not None:
+            raise AppError(409, "upload_target_removed", "上传对应的页面已移除，请保留原文件并重新发起上传")
         return page, note.revision
     notes.revision_matches(note, revision)
     if upload.status != "received":
@@ -148,7 +150,7 @@ def complete_upload(db, user, upload_id, revision):
         raise AppError(503, "storage_unavailable", "文件存储暂不可用，请稍后重试") from None
     if actual.size != file.expected_bytes:
         raise AppError(422, "upload_mismatch", "文件实际大小与声明不一致")
-    last = db.scalar(select(func.max(NotePage.position)).where(NotePage.note_id == note.id))
+    last = db.scalar(select(func.max(NotePage.position)).where(NotePage.note_id == note.id, NotePage.deleted_at.is_(None)))
     page = NotePage(owner_id=user.id, note_id=note.id, file_id=file.id,
                     position=0 if last is None else last + 1)
     db.add(page)
@@ -165,7 +167,7 @@ def complete_upload(db, user, upload_id, revision):
 def list_pages(db, user, note_id):
     image_note(db, user, note_id)
     return db.scalars(select(NotePage).where(NotePage.owner_id == user.id,
-                                            NotePage.note_id == note_id).order_by(NotePage.position)).all()
+                                            NotePage.note_id == note_id, NotePage.deleted_at.is_(None)).order_by(NotePage.position)).all()
 
 
 def reorder_pages(db, user, note_id, data):
@@ -193,7 +195,9 @@ def reorder_pages(db, user, note_id, data):
 
 def linked_file(db, user, file_id):
     file = require_owner(user, db.get(File, file_id))
-    # A file is readable only through a live private note, including after trashing it.
+    # Current and retired page identities retain owner-only historical byte
+    # access while the note is live. Shares and current lists filter retirement
+    # independently; a tombstone never grants cross-owner or administrator access.
     linked = db.scalar(select(NotePage.id).join(Note, NotePage.note_id == Note.id).where(
         NotePage.file_id == file.id, NotePage.owner_id == user.id,
         Note.owner_id == user.id, Note.deleted_at.is_(None)).limit(1))

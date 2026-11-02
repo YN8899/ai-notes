@@ -83,3 +83,22 @@
 @media(max-width:850px){.chat-layout{grid-template-columns:minmax(0,1fr)}.chat-history{max-height:220px}.chat-main{padding:20px}.chat-controls{flex-wrap:wrap}}
 
 .text-selection-scope blockquote{white-space:pre-wrap;overflow-wrap:anywhere;max-height:220px;overflow:auto;border-left:3px solid #91ae97;margin:10px 0;padding:4px 12px}.text-source-body{white-space:pre-wrap;overflow-wrap:anywhere;max-height:60vh;overflow:auto;line-height:1.9;margin-top:16px;padding:16px;background:white;border:1px solid #d7e2d5;border-radius:8px}.text-source-body mark{background:#f7df8c;color:#243e36;scroll-margin:80px}.text-source-reader .panel-heading{gap:12px;flex-wrap:wrap}.text-source-reader h4{overflow-wrap:anywhere}
+.ai-model-picker,.ai-tools,.ai-tool-history,.ai-tool-source{min-width:0;max-width:100%}
+.ai-model-picker select{width:100%;max-width:100%;text-overflow:ellipsis}
+.ai-tools,.ai-tool-history{border:1px solid var(--border,#dfe5e1);border-radius:8px;padding:12px;margin:10px 0}
+.ai-tools summary,.ai-tool-history summary{cursor:pointer;overflow-wrap:anywhere}
+.ai-tools fieldset{min-width:0;border:0;padding:0;margin-top:12px}
+.ai-tools small,.ai-tool-history small{display:block;overflow-wrap:anywhere;color:var(--muted,#6d756f)}
+.ai-tool-note-list{max-height:260px;overflow:auto;margin:10px 0}
+.ai-tools label,.ai-tool-history li,.ai-tool-preview li{overflow-wrap:anywhere}
+.ai-tool-preview{padding-top:12px;margin-top:12px;border-top:1px solid var(--border,#dfe5e1)}
+.ai-tool-preview ol,.ai-tool-history ol{padding-left:20px}
+.ai-tool-history pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:360px;overflow:auto;font-size:13px}
+.ai-tool-history p,.ai-tool-history small,.ai-tool-source{overflow-wrap:anywhere}
+.ai-tool-dates{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.ai-tool-dates p{grid-column:1/-1}
+.ai-tool-source{border-left:2px solid var(--border,#dfe5e1);padding-left:10px;margin:10px 0}
+.ai-tools .card-check{display:flex;align-items:flex-start;gap:8px;margin:8px 0}
+.ai-tools .card-check input{flex:0 0 auto;width:auto;margin-top:3px}
+.ai-model-caption+thead th,.table-wrap td{overflow-wrap:anywhere}
+@media(max-width:600px){.ai-tool-dates{grid-template-columns:minmax(0,1fr)}.chat-controls>.ai-model-picker{flex-basis:100%;width:100%}.ai-tools .note-actions button{max-width:100%;white-space:normal}.ai-tool-history{padding:10px}}
