@@ -36155,7 +36155,7 @@
           "password": {
             "type": "string",
             "maxLength": 128,
-            "minLength": 10,
+            "minLength": 6,
             "title": "Password"
           },
           "display_name": {
@@ -36217,7 +36217,7 @@
           "password": {
             "type": "string",
             "maxLength": 128,
-            "minLength": 10,
+            "minLength": 6,
             "title": "Password"
           }
         },

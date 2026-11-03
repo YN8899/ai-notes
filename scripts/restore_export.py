@@ -97,7 +97,7 @@ def _target_url(database_url):
 
 
 def _password(password):
-    _require(isinstance(password, str) and 10 <= len(password) <= 128,
+    _require(isinstance(password, str) and 6 <= len(password) <= 128,
              "restore_password_invalid")
     try:
         validate_pg_text(password)
@@ -730,7 +730,7 @@ def main():
                 _require(not stream.read(1), "restore_password_invalid")
             password = password.removesuffix("\n").removesuffix("\r")
         else:
-            password = getpass.getpass("恢复账号的新密码（10 至 128 个字符）：")
+            password = getpass.getpass("恢复账号的新密码（6 至 128 个字符）：")
             _require(password == getpass.getpass("再次输入新密码："), "restore_password_invalid")
         result = restore_archive(arguments.archive, database_url=database_url,
                                  storage_root=arguments.storage_root, password=password)

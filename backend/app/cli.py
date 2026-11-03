@@ -16,9 +16,9 @@ def main():
     username = args.username.lower()
     if not re.fullmatch(r"[a-z0-9_-]{3,32}", username):
         parser.error("用户名要求 3 至 32 位字母、数字、下划线或连字符")
-    password = getpass.getpass("密码（至少 10 位，不回显）：")
-    if len(password) < 10 or len(password) > 128:
-        parser.error("密码长度必须为 10 至 128")
+    password = getpass.getpass("密码（至少 6 位，不回显）：")
+    if len(password) < 6 or len(password) > 128:
+        parser.error("密码长度必须为 6 至 128")
     if password != getpass.getpass("再次输入密码："):
         parser.error("两次密码不一致")
     with SessionLocal.begin() as db:

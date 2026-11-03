@@ -61,7 +61,7 @@ function AuthScreen({notice,error,onOffline}:{notice?:string;error?:unknown;onOf
       <form onSubmit={submit} key={mode}>
         {mode!=='reset'?<label>用户名<input name="username" required minLength={3} maxLength={32} pattern={'[a-zA-Z0-9_\\-]+'} autoComplete="username" placeholder="3–32 位字母、数字或下划线"/></label>:<label>重置凭证<input name="token" required minLength={20} maxLength={128} autoComplete="off"/></label>}
         {mode==='register'?<label>显示名称<input name="display_name" required maxLength={64} placeholder="朋友如何称呼你"/></label>:null}
-        <label>{mode==='reset'?'新密码':'密码'}<input name="password" type="password" required minLength={mode==='login'?1:10} maxLength={128} autoComplete={mode==='login'?'current-password':'new-password'} placeholder={mode==='login'?'输入密码':'至少 10 位'}/></label>
+        <label>{mode==='reset'?'新密码':'密码'}<input name="password" type="password" required minLength={mode==='login'?1:6} maxLength={128} autoComplete={mode==='login'?'current-password':'new-password'} placeholder={mode==='login'?'输入密码':'至少 6 位'}/></label>
         {mode==='register'?<label>邀请码<input name="invite_code" required minLength={20} maxLength={128} autoComplete="off" placeholder="粘贴管理员提供的邀请码"/></label>:null}
         <ErrorMessage error={mutation.error}/><button className="primary full" disabled={mutation.isPending}>{mutation.isPending?'正在处理…':mode==='login'?'登录学习空间':mode==='register'?'创建账户':'重置密码'}<ArrowUpRight size={18}/></button>
       </form>

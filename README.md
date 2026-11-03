@@ -62,7 +62,7 @@ docker compose exec api python -m app.cli create-admin --username admin
 
 Windows 可将首条命令替换为 `py scripts/init_env.py`。初始化脚本只使用 Python 标准库，生成随机数据库密码，不输出密码。管理员命令交互输入两次密码，没有内置默认账户，也不会开放网页管理员注册。
 
-访问 http://localhost:8080 登录；API 文档位于 http://localhost:8080/docs。管理员创建邀请码后及时复制；好友使用邀请码在注册页面创建账户。每个密码至少 10 位。
+访问 http://localhost:8080 登录；API 文档位于 http://localhost:8080/docs。管理员创建邀请码后及时复制；好友使用邀请码在注册页面创建账户。每个密码至少 6 位。
 
 网页支持同一浏览器不同标签页分别登录不同账号：刷新保留本页登录，新开或复制标签页需单独登录，退出只影响当前会话。使用及更新说明见 [标签页独立登录](docs/标签页独立登录.md)。
 

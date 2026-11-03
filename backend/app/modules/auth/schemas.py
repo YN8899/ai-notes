@@ -15,7 +15,7 @@ class LoginIn(BaseModel):
 
 
 class RegisterIn(LoginIn):
-    password: str = Field(min_length=10, max_length=128)
+    password: str = Field(min_length=6, max_length=128)
     display_name: str = Field(min_length=1, max_length=64)
     invite_code: str = Field(min_length=20, max_length=128)
 
@@ -46,7 +46,7 @@ class OkOut(BaseModel):
 
 class ResetIn(BaseModel):
     token: str = Field(min_length=20, max_length=128)
-    password: str = Field(min_length=10, max_length=128)
+    password: str = Field(min_length=6, max_length=128)
 
 
 class ResetOut(BaseModel):
