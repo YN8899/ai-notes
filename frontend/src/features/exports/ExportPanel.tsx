@@ -38,8 +38,8 @@ export function ExportPanel({ owner }: { owner: string }) {
       if (current()) { setBusy(false); setProgress(null) }
     }
   }
-  return <details className="panel export-panel">
-    <summary>完整导出</summary>
+  return <section className="panel export-panel" aria-labelledby="archive-export-heading">
+    <h3 id="archive-export-heading">完整导出</h3>
     <p>将当前账号的笔记（含回收站）、文件与历史版本、AI 对话及工具历史、学习卡片、测验与作答、复习计划和日志、学习记录、首页偏好与学习分析，以及本人社交/社区历史和合法可读附件一起打包为 ZIP v5。</p>
     <p className="muted">只包含已同步到服务器的内容。请等待笔记保存、上传和后台转换完成后再导出。此 ZIP 用于归档，目前尚无一键导入功能。</p>
     <p className="muted">单次未压缩内容最多 512 MiB。下载期间浏览器会临时使用内存接收文件，请保持页面打开；打包较久或网络中断时可以重试。</p>
@@ -48,5 +48,5 @@ export function ExportPanel({ owner }: { owner: string }) {
     <NoteError error={error}/>
     <div className="note-actions"><button type="button" className="secondary" disabled={busy} onClick={() => void download()}>{busy ? '正在准备下载…' : '生成并下载 ZIP'}</button>
       {busy ? <button type="button" className="text-button" onClick={() => controller.current?.abort()}>取消导出</button> : null}</div>
-  </details>
+  </section>
 }

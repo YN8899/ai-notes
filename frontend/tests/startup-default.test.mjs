@@ -52,3 +52,18 @@ test('actual App late preferences never override manual navigation, including af
 test('actual App keeps restored notes/chat precedence both before and after marker persistence',()=>{
  for(const restored of ['notes','chat']){const storage=memoryStorage();for(const id of ['first','reload']){const app=mount({storage,id,restored});app.render();app.render();assert.match(app.route(),restored==='notes'?/我的笔记/:/AI 对话/)}}
 })
+
+test('actual App opens notes while homepage preferences are unavailable',()=>{
+ const app=mount({storage:memoryStorage(),initialPreferences:null});app.render();app.render()
+ assert.match(app.route(),/我的笔记/)
+})
+
+test('actual App settings do not replace the last notes or chat restoration point',()=>{
+ for(const restored of ['notes','chat']){
+  const storage=memoryStorage(),app=mount({storage,restored});app.render();app.render()
+  app.click('设置');app.render();assert.match(app.route(),/个人资料与隐私/)
+  assert.equal(app.remembered(),restored)
+  const reload=mount({storage,id:'after-settings',restored:app.remembered()});reload.render();reload.render()
+  assert.match(reload.route(),restored==='notes'?/我的笔记/:/AI 对话/)
+ }
+})
