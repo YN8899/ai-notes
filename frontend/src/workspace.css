@@ -88,6 +88,35 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .workspace-refresh .settings-roadmap { margin-top: 22px; }
 .workspace-refresh .settings-roadmap summary { padding: 0; color: #52685c; }
 
+.home-workspace { display: grid; gap: 16px; min-width: 0; }
+.home-workspace > .panel, .home-workbench > .home-quick-panel { margin: 0; }
+.home-workbench { display: grid; gap: 12px; min-width: 0; }
+.home-quick-panel h3 { margin: 0; }
+.home-quick-panel .social-count-grid { margin: 14px 0; }
+.home-quick-panel .social-count-grid button { min-width: 0; gap: 7px; padding: 14px; border-color: var(--ui-border); }
+.home-quick-panel .social-count-grid button:hover { background: #f3f8f5; }
+.home-quick-panel .social-count-grid small { color: var(--ui-muted); }
+.home-notice-empty { display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: center; margin: 8px 0; font-size: 13px; }
+.home-notice-empty button { display: inline-flex; align-items: center; gap: 4px; }
+.home-status > summary { cursor: pointer; color: #52685c; }
+.home-status > summary .badge { margin-left: 6px; }
+.home-status > summary .home-status-error { background: #fff0ec; color: #8a3e2e; }
+.home-status .status-grid { margin: 14px 0 0; }
+
+.learning-overview .learning-summary-range { margin: 4px 0 0; font-size: 13px; }
+.learning-overview .learning-range-toggle { display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.learning-range-panel { margin: 14px 0; padding: 12px 16px; background: #f7faf8; border: 1px solid var(--ui-border); border-radius: 8px; }
+.learning-range-panel .learning-range { margin: 10px 0; }
+.learning-range-panel > .muted { margin: 6px 0 0; }
+.learning-summary > .learning-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); margin-top: 16px; }
+.learning-summary > .learning-metrics + .muted { margin-bottom: 0; }
+
+@media (max-width: 560px) {
+  .home-status .status-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .learning-summary > .learning-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .learning-summary > .learning-metrics > :first-child { grid-column: 1 / -1; }
+}
+
 /* Keep authentication focused on the form, with the offline entry available. */
 .auth-layout { background: var(--ui-surface); }
 .auth-layout .auth-story { background: #edf4ef; color: #244537; }
